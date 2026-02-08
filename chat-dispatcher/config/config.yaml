@@ -1,0 +1,29 @@
+server:
+  host: "0.0.0.0"
+  port: 8089
+
+kafka:
+  brokers: "localhost:9092"
+  topic: "chat-messages"
+  group_id: "chat-dispatcher"
+  auto_offset_reset: "latest"
+  max_poll_interval_ms: 300000
+  session_timeout_ms: 45000
+  heartbeat_interval_ms: 3000
+  fetch_min_bytes: 1
+  fetch_max_wait_ms: 500
+
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+  registry_prefix: "chat:registry"
+  lookup_timeout: 2s
+
+grpc:
+  dial_timeout: 5s
+  call_timeout: 3s
+  idle_timeout: 5m
+
+log:
+  level: "info"
