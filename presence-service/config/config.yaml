@@ -1,0 +1,31 @@
+server:
+  host: "0.0.0.0"
+  port: 8092
+  # instance_id: ""  # optional, for origin_instance_id in pub payload
+
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+  pub_sub_channel: "presence:room_updates"
+
+auth:
+  grpc_address: "localhost:50051"
+
+presence:
+  heartbeat_interval: 30s
+  heartbeat_timeout: 90s
+  broadcast_interval: 1s
+  ping_interval: 30s
+  pong_wait: 60s
+  write_wait: 10s
+  max_message_size: 4096
+
+kafka:
+  brokers: "localhost:9092"
+  topic: "broadcast-events"
+  group_id: "presence-service"
+  grace_period: 60s
+
+log:
+  level: info
