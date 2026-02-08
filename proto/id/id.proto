@@ -1,0 +1,68 @@
+syntax = "proto3";
+package id;
+option go_package = "github.com/weiawesome/wes-io-live/proto/id";
+
+service IDService {
+  rpc GenerateID(GenerateIDRequest) returns (GenerateIDResponse);
+  rpc GenerateBatchIDs(GenerateBatchIDsRequest) returns (GenerateBatchIDsResponse);
+  rpc ValidateID(ValidateIDRequest) returns (ValidateIDResponse);
+  rpc ParseID(ParseIDRequest) returns (ParseIDResponse);
+}
+
+enum IDType {
+  ID_TYPE_SNOWFLAKE = 0;
+  ID_TYPE_UUID      = 1;
+  ID_TYPE_ULID      = 2;
+  ID_TYPE_KSUID     = 3;
+  ID_TYPE_NANOID    = 4;
+  ID_TYPE_CUID2     = 5;
+}
+
+message GenerateIDRequest {
+  IDType type = 1;
+}
+
+message GenerateIDResponse {
+  string id = 1;
+}
+
+message GenerateBatchIDsRequest {
+  IDType type = 1;
+  int32 count = 2;   // 上限 1000
+}
+
+message GenerateBatchIDsResponse {
+  repeated string ids = 1;
+}
+
+message ValidateIDRequest {
+  IDType type = 1;
+  string id = 2;
+}
+
+message ValidateIDResponse {
+  bool valid = 1;
+  string reason = 2;  // 失敗原因（valid=true 時為空）
+}
+
+message ParseIDRequest {
+  IDType type = 1;
+  string id = 2;
+}
+
+message ParseIDResponse {
+  bool valid = 1;
+  string error_message = 2;
+  // Snowflake fields
+  int64 timestamp_ms = 3;     // Unix ms（absolute，已加回 epoch）
+  int64 machine_id = 4;
+  int64 sequence = 5;
+  // UUID fields
+  int32 uuid_version = 6;     // 4 for v4
+  string uuid_variant = 7;    // "RFC4122"
+  // ULID/KSUID fields
+  string random_payload = 8;  // hex-encoded random bytes
+  // NanoID/CUID2 fields
+  int32 id_length = 9;        // ID string length
+  string alphabet = 10;       // NanoID: character set used
+}
