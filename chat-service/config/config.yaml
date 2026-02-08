@@ -1,0 +1,36 @@
+server:
+  host: "0.0.0.0"
+  port: 8088
+
+grpc:
+  host: "0.0.0.0"
+  port: 50052
+  advertise_address: "localhost:50052"
+
+websocket:
+  ping_interval: 30s
+  pong_wait: 60s
+  write_wait: 10s
+  max_message_size: 4096
+
+auth:
+  grpc_address: "localhost:50051"
+
+id_service:
+  grpc_address: "localhost:50053"
+
+kafka:
+  brokers: "localhost:9092"
+  topic: "chat-messages"
+  partitions: 8
+
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+  registry_prefix: "chat:registry"
+  heartbeat_interval: 10s
+  key_ttl: 30s
+
+log:
+  level: "info"
