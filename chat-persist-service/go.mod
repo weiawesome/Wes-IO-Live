@@ -1,9 +1,9 @@
 module github.com/weiawesome/wes-io-live/chat-persist-service
 
-go 1.22
+go 1.24.3
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.3.0
+	github.com/confluentinc/confluent-kafka-go/v2 v2.13.0
 	github.com/gocql/gocql v1.6.0
 	github.com/spf13/viper v1.19.0
 	github.com/weiawesome/wes-io-live/pkg v0.0.0
@@ -26,7 +26,7 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
+	golang.org/x/exp v0.0.0-20240112132812-db7319d0e0e3 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
