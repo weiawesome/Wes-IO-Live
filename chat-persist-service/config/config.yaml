@@ -1,0 +1,29 @@
+server:
+  host: "0.0.0.0"
+  port: 8090
+
+kafka:
+  brokers: "localhost:9092"
+  topic: "chat-messages"
+  group_id: "chat-persist"
+  auto_offset_reset: "earliest"
+  max_poll_interval_ms: 300000
+  session_timeout_ms: 45000
+  heartbeat_interval_ms: 3000
+  fetch_min_bytes: 1
+  fetch_max_wait_ms: 500
+
+cassandra:
+  hosts:
+    - "localhost:9042"
+  keyspace: "wes_chat"
+  username: ""
+  password: ""
+  consistency: "LOCAL_QUORUM"
+  connect_timeout: "10s"
+  timeout: "5s"
+  num_conns: 2
+  max_prepared_stmt: 1000
+
+log:
+  level: "info"
