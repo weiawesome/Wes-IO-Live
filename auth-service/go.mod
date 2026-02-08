@@ -1,6 +1,6 @@
 module github.com/weiawesome/wes-io-live/auth-service
 
-go 1.22
+go 1.24.3
 
 require (
 	github.com/spf13/viper v1.19.0
