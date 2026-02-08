@@ -1,0 +1,83 @@
+server:
+  host: "0.0.0.0"
+  port: 8085
+
+hls:
+  output_dir: "./hls"
+  segment_duration: 2
+  playlist_size: 5
+  delete_segments: true
+
+webrtc:
+  ice_servers:
+    - urls: ["stun:stun.l.google.com:19302"]
+  # Cloudflare TURN credentials (can also be set via CF_TURN_ID and CF_TURN_KEY env vars)
+  turn_key_id: ""
+  turn_key: ""
+
+pubsub:
+  driver: "kafka"
+  redis:
+    address: "localhost:6379"
+    password: ""
+    db: 0
+  kafka:
+    brokers: "localhost:9092"
+    group_id: "media-service"
+    partitions: 4
+
+ffmpeg:
+  # Video settings
+  video_codec: "libx264"
+  video_preset: "veryslow"
+  video_bitrate: "2M"          # e.g., "2M", "1500k". Empty = use CRF
+  video_crf: 18              # Constant Rate Factor (0-51). 0 = disabled, use bitrate
+  width: 0                   # Output width. 0 = original resolution
+  height: 0                  # Output height. 0 = original resolution
+  framerate: 0               # Output framerate. 0 = original framerate
+  # Audio settings
+  audio_codec: "aac"
+  audio_bitrate: "128k"      # e.g., "128k", "192k"
+  audio_sample: 48000        # Sample rate in Hz
+
+log:
+  level: "info"
+
+# Storage and VOD configuration
+storage:
+  type: "s3"              # "local" or "s3" - use S3 for live + VOD playback
+  local:
+    base_path: "./hls"
+  s3:
+    # MinIO (run: docker-compose up -d minio)
+    endpoint: "http://localhost:9000"
+    region: "us-east-1"
+    bucket: "vod"
+    access_key_id: "minioadmin"      # Set via S3_ACCESS_KEY_ID env var
+    secret_access_key: "minioadmin"  # Set via S3_SECRET_ACCESS_KEY env var
+    use_path_style: true   # Required for MinIO
+    public_url: ""         # Optional: public URL prefix for VOD playback
+  vod:
+    enabled: true          # Enable VOD recording & S3 upload
+    async_upload: true     # Upload segments asynchronously
+    upload_workers: 4      # Number of concurrent upload workers
+    retention_days: 30     # VOD retention period
+  session:
+    type: "memory"         # "memory" or "redis"
+    redis:
+      # Optional: use dedicated redis settings, or leave empty to use pubsub.redis
+      address: ""          # Empty = use pubsub.redis.address
+      password: ""
+      db: 1                # Recommended: use different db from pubsub
+      key_prefix: "vod:session:"
+      ttl: 86400           # Session TTL in seconds (default: 24 hours)
+
+# Preview image configuration
+preview:
+  enabled: true            # Enable periodic screenshot capture
+  interval_seconds: 60     # Capture screenshot every 60 seconds
+  initial_delay_seconds: 10  # Wait before first capture (allows HLS buffer to fill for better quality)
+  width: 1920              # Screenshot width (1920 for better quality)
+  height: 1080             # Screenshot height (1080 for better quality)
+  format: jpeg             # Output format (jpeg)
+  quality: 95              # JPEG quality (0-100, higher is better, 95 recommended)
