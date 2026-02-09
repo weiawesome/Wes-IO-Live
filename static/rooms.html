@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wes.IO Live - Rooms</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #7dd3fc;
+            --accent-dark: #38bdf8;
+            --accent-soft: rgba(125, 211, 252, 0.25);
+            --pink: #f9a8d4;
+            --live-red: #fb7185;
+            --live-glow: rgba(251, 113, 133, 0.5);
+            --bg-dark: #0f172a;
+            --bg-card: rgba(30, 41, 59, 0.5);
+            --text-muted: #94a3b8;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        @keyframes gradient-shift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        @keyframes bubble-float {
+            0%, 100% { transform: translateY(100vh) scale(0); opacity: 0; }
+            10% { opacity: 0.5; }
+            90% { opacity: 0.3; }
+            100% { transform: translateY(-100px) scale(1); opacity: 0; }
+        }
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes live-pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--live-glow); }
+            50% { opacity: 0.95; box-shadow: 0 0 0 8px rgba(251, 113, 133, 0); }
+        }
+        @keyframes live-badge-blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.05); }
+        }
+        @keyframes card-enter {
+            from { opacity: 0; transform: translateY(20px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes modal-in {
+            from { opacity: 0; transform: scale(0.92); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes float-soft {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+
+        body {
+            font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #0f172a 100%);
+            background-size: 200% 200%;
+            animation: gradient-shift 14s ease infinite;
+            color: #e2e8f0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .bg-bubbles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .bg-bubbles span {
+            position: absolute;
+            bottom: -60px;
+            display: block;
+            width: 36px;
+            height: 36px;
+            background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+            border-radius: 50%;
+            animation: bubble-float 18s linear infinite;
+        }
+        .bg-bubbles span:nth-child(1) { left: 5%; animation-delay: 0s; }
+        .bg-bubbles span:nth-child(2) { left: 20%; animation-delay: 3s; width: 28px; height: 28px; animation-duration: 16s; }
+        .bg-bubbles span:nth-child(3) { left: 50%; animation-delay: 6s; width: 44px; height: 44px; }
+        .bg-bubbles span:nth-child(4) { left: 75%; animation-delay: 2s; }
+        .bg-bubbles span:nth-child(5) { left: 90%; animation-delay: 5s; width: 32px; height: 32px; animation-duration: 20s; }
+
+        .header {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            position: relative;
+            z-index: 10;
+            animation: fade-in-up 0.5s ease-out;
+        }
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--pink) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .user-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+            color: #0f172a;
+            box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.45); }
+        .btn-danger {
+            background: linear-gradient(135deg, var(--live-red) 0%, #e11d48 100%);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(251, 113, 133, 0.35);
+        }
+        .btn-danger:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(251, 113, 133, 0.45); }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); transform: translateY(-1px); }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .section {
+            margin-bottom: 32px;
+            animation: fade-in-up 0.6s ease-out both;
+        }
+        .section:nth-of-type(1) { animation-delay: 0.1s; }
+        .section:nth-of-type(2) { animation-delay: 0.2s; }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .room-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 22px;
+        }
+        .room-card {
+            background: var(--bg-card);
+            border-radius: 18px;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(10px);
+            transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation: card-enter 0.5s ease-out both;
+        }
+        .room-card:hover {
+            transform: translateY(-6px);
+            border-color: rgba(125, 211, 252, 0.25);
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.35);
+        }
+        /* Live room: distinct style */
+        .room-card.live {
+            border-color: rgba(251, 113, 133, 0.5);
+            background: linear-gradient(180deg, rgba(251, 113, 133, 0.08) 0%, var(--bg-card) 30%);
+            box-shadow: 0 0 0 1px rgba(251, 113, 133, 0.2), 0 12px 28px -8px rgba(0, 0, 0, 0.4);
+            animation: card-enter 0.5s ease-out both, live-pulse 2.5s ease-in-out infinite;
+        }
+        .room-card.live:hover {
+            border-color: var(--live-red);
+            box-shadow: 0 0 24px var(--live-glow), 0 20px 40px -12px rgba(0, 0, 0, 0.4);
+        }
+        .room-card.live .room-thumbnail::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, transparent 50%, rgba(251, 113, 133, 0.06) 100%);
+            pointer-events: none;
+        }
+
+        .room-thumbnail {
+            aspect-ratio: 16/9;
+            background: #1e293b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            position: relative;
+            overflow: hidden;
+        }
+        .room-thumbnail .thumbnail-img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        .room-card:hover .room-thumbnail .thumbnail-img {
+            transform: scale(1.05);
+        }
+        .room-thumbnail .thumbnail-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .live-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: linear-gradient(135deg, var(--live-red) 0%, #e11d48 100%);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            z-index: 2;
+            box-shadow: 0 4px 12px rgba(251, 113, 133, 0.5);
+            animation: live-badge-blink 1.5s ease-in-out infinite;
+        }
+        .viewer-count {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(6px);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            z-index: 2;
+        }
+        .room-card.live .viewer-count {
+            background: rgba(251, 113, 133, 0.25);
+            border: 1px solid rgba(251, 113, 133, 0.4);
+        }
+        .room-info {
+            padding: 16px;
+        }
+        .room-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .room-owner {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        .room-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .tag {
+            background: var(--accent-soft);
+            color: var(--accent);
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .room-card.live .tag {
+            background: rgba(251, 113, 133, 0.2);
+            color: #fda4af;
+        }
+        .room-actions {
+            padding: 0 16px 16px;
+            display: flex;
+            gap: 10px;
+        }
+        .room-actions .btn {
+            flex: 1;
+            padding: 10px 12px;
+            font-size: 0.85rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 1rem;
+            animation: float-soft 3s ease-in-out infinite;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(6px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal.show { display: flex; }
+        .modal.show .modal-content {
+            animation: modal-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .modal-content {
+            background: #1e293b;
+            border-radius: 20px;
+            padding: 28px;
+            width: 100%;
+            max-width: 450px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 22px;
+        }
+        .modal-header h2 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #fff;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.75rem;
+            cursor: pointer;
+            line-height: 1;
+            transition: color 0.2s, transform 0.2s;
+        }
+        .modal-close:hover { color: #fff; transform: scale(1.1); }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.06);
+            background: rgba(15, 23, 42, 0.5);
+            color: #fff;
+            font-size: 0.95rem;
+            font-family: inherit;
+            transition: all 0.3s ease;
+        }
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-soft);
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 88px;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        .modal-actions .btn { flex: 1; }
+
+        .error {
+            background: rgba(248, 113, 113, 0.15);
+            color: #fca5a5;
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 18px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+
+        .btn-vod {
+            background: rgba(125, 211, 252, 0.2);
+            color: var(--accent);
+            border: 1px solid rgba(125, 211, 252, 0.3);
+        }
+        .btn-vod:hover { background: rgba(125, 211, 252, 0.3); transform: translateY(-1px); }
+
+        .vod-list {
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        .vod-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+        .vod-item:hover {
+            background: rgba(125, 211, 252, 0.1);
+            transform: translateX(4px);
+        }
+        .vod-item-info {
+            flex: 1;
+        }
+        .vod-session-id {
+            font-size: 0.85rem;
+            color: #e2e8f0;
+            font-family: monospace;
+            font-weight: 600;
+        }
+        .vod-session-date {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .vod-empty {
+            text-align: center;
+            padding: 36px 24px;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-bubbles">
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <header class="header">
+        <h1>Wes.IO Live</h1>
+        <div class="header-right">
+            <span class="user-info" id="userInfo"></span>
+            <button class="btn btn-danger" id="logoutBtn">Sign out</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- My Rooms Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">My rooms</h2>
+                <button class="btn btn-primary" id="createRoomBtn">+ Create room</button>
+            </div>
+            <div id="myRooms" class="room-grid">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <!-- All Rooms Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">All rooms</h2>
+            </div>
+            <div id="allRooms" class="room-grid">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Room Modal -->
+    <div class="modal" id="createModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create new room</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="createError" class="error" style="display: none;"></div>
+            <form id="createForm">
+                <div class="form-group">
+                    <label for="roomTitle">Room title</label>
+                    <input type="text" id="roomTitle" placeholder="Enter room title" required maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label for="roomDesc">Description (optional)</label>
+                    <textarea id="roomDesc" placeholder="Room description..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="roomTags">Tags (optional, comma-separated)</label>
+                    <input type="text" id="roomTags" placeholder="gaming, chat, music">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- VOD List Modal -->
+    <div class="modal" id="vodModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Watch replay</h2>
+                <button class="modal-close" onclick="closeVodModal()">&times;</button>
+            </div>
+            <div id="vodList" class="vod-list">
+                <div class="vod-empty">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        // Check auth
+        if (!Auth.requireAuth()) {
+            throw new Error('Not authenticated');
+        }
+
+        const user = Auth.getUser();
+        document.getElementById('userInfo').textContent = `${user.username}`;
+
+        // Logout
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            Auth.clear();
+            window.location.href = 'index.html';
+        });
+
+        // Modal functions
+        function openModal() {
+            document.getElementById('createModal').classList.add('show');
+        }
+        function closeModal() {
+            document.getElementById('createModal').classList.remove('show');
+            document.getElementById('createForm').reset();
+            document.getElementById('createError').style.display = 'none';
+        }
+
+        document.getElementById('createRoomBtn').addEventListener('click', openModal);
+
+        // Create room form
+        document.getElementById('createForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('createError');
+            errorEl.style.display = 'none';
+
+            const title = document.getElementById('roomTitle').value.trim();
+            const description = document.getElementById('roomDesc').value.trim();
+            const tagsInput = document.getElementById('roomTags').value.trim();
+            const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+
+            try {
+                const response = await API.rooms.create(title, description, tags);
+                closeModal();
+                loadMyRooms();
+                // Navigate to broadcaster
+                window.location.href = `broadcaster.html?room=${response.data.id}`;
+            } catch (error) {
+                errorEl.textContent = error.message;
+                errorEl.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Create';
+            }
+        });
+
+        // Render room card (live rooms use .live style, aligned with presence status)
+        function renderRoomCard(room, isMine = false, animationIndex = 0) {
+            const isLive = room.status === 'live';
+            const card = document.createElement('div');
+            card.className = `room-card${isLive ? ' live' : ''}`;
+            card.style.animationDelay = `${animationIndex * 0.06}s`;
+
+            let actionsHtml;
+            if (isMine) {
+                actionsHtml = `
+                    <button class="btn btn-primary" onclick="startBroadcast('${room.id}')">Start live</button>
+                    <button class="btn btn-vod" onclick="showVODs('${room.id}')">Replay</button>
+                    <button class="btn btn-danger" onclick="closeRoom('${room.id}')">Close</button>
+                `;
+            } else if (isLive) {
+                actionsHtml = `
+                    <button class="btn btn-primary" onclick="watchRoom('${room.id}')">
+                        ${isLive ? 'Watch live' : 'Enter room'}
+                    </button>
+                    <button class="btn btn-vod" onclick="showVODs('${room.id}')">Replay</button>
+                `;
+            } else {
+                actionsHtml = `
+                    <button class="btn btn-secondary" onclick="watchRoom('${room.id}')">Enter room</button>
+                    <button class="btn btn-vod" onclick="showVODs('${room.id}')">Replay</button>
+                `;
+            }
+
+            // Preview image URL with cache busting for live streams
+            const previewUrl = `/preview/${room.id}/latest/thumbnail.jpg${isLive ? '?t=' + Date.now() : ''}`;
+
+            card.innerHTML = `
+                <div class="room-thumbnail">
+                    <img src="${previewUrl}"
+                         alt="Preview"
+                         class="thumbnail-img"
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                    <div class="thumbnail-placeholder" style="display: none;">
+                        <span>No preview</span>
+                    </div>
+                    ${isLive ? '<span class="live-badge">LIVE</span>' : ''}
+                    <span class="viewer-count">${room.viewer_count} viewers</span>
+                </div>
+                <div class="room-info">
+                    <div class="room-title">${escapeHtml(room.title)}</div>
+                    <div class="room-owner">by ${escapeHtml(room.owner_username)}</div>
+                    <div class="room-tags">
+                        ${(room.tags || []).map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+                    </div>
+                </div>
+                <div class="room-actions">
+                    ${actionsHtml}
+                </div>
+            `;
+
+            return card;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /**
+         * Get live rooms and viewer counts from presence-service, merge into room list
+         * @param {Array} rooms - Room array (updated in place: status / viewer_count)
+         */
+        async function mergePresenceIntoRooms(rooms) {
+            if (!rooms.length) return;
+            try {
+                const { rooms: liveRoomIds = [] } = await API.presence.getLiveRooms();
+                const liveSet = new Set(liveRoomIds);
+
+                for (const room of rooms) {
+                    if (liveSet.has(room.id)) room.status = 'live';
+                }
+
+                // Fetch viewer count for live rooms in parallel
+                const liveRooms = rooms.filter(r => r.status === 'live');
+                await Promise.all(liveRooms.map(async (room) => {
+                    try {
+                        const presence = await API.presence.getRoomPresence(room.id);
+                        room.viewer_count = presence.total != null ? presence.total : room.viewer_count;
+                    } catch (_) {}
+                }));
+            } catch (_) {
+                // On presence API failure, list still works; just no live status or viewer count
+            }
+        }
+
+        // Load my rooms
+        async function loadMyRooms() {
+            const container = document.getElementById('myRooms');
+            try {
+                const response = await API.rooms.my();
+                const rooms = response.data.rooms || [];
+
+                if (rooms.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No rooms created yet</div>';
+                    return;
+                }
+
+                await mergePresenceIntoRooms(rooms);
+
+                container.innerHTML = '';
+                rooms.forEach((room, index) => {
+                    const card = renderRoomCard(room, true, index);
+                    container.appendChild(card);
+                });
+            } catch (error) {
+                container.innerHTML = `<div class="empty-state">Load failed: ${error.message}</div>`;
+            }
+        }
+
+        // Load all rooms
+        async function loadAllRooms() {
+            const container = document.getElementById('allRooms');
+            try {
+                const response = await API.rooms.list(1, 50, 'active');
+                const rooms = response.data.rooms || [];
+
+                if (rooms.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No active rooms at the moment</div>';
+                    return;
+                }
+
+                await mergePresenceIntoRooms(rooms);
+
+                container.innerHTML = '';
+                rooms.forEach((room, index) => {
+                    const card = renderRoomCard(room, room.owner_id === user.id, index);
+                    container.appendChild(card);
+                });
+            } catch (error) {
+                container.innerHTML = `<div class="empty-state">Load failed: ${error.message}</div>`;
+            }
+        }
+
+        // Actions
+        function startBroadcast(roomId) {
+            window.location.href = `broadcaster.html?room=${roomId}`;
+        }
+
+        function watchRoom(roomId) {
+            window.location.href = `viewer.html?room=${roomId}`;
+        }
+
+        async function closeRoom(roomId) {
+            if (!confirm('Are you sure you want to close this room?')) return;
+
+            try {
+                await API.rooms.close(roomId);
+                loadMyRooms();
+                loadAllRooms();
+            } catch (error) {
+                alert('Failed to close: ' + error.message);
+            }
+        }
+
+        // VOD Modal functions
+        let currentVodRoomId = null;
+
+        function openVodModal() {
+            document.getElementById('vodModal').classList.add('show');
+        }
+
+        function closeVodModal() {
+            document.getElementById('vodModal').classList.remove('show');
+            currentVodRoomId = null;
+        }
+
+        async function showVODs(roomId) {
+            currentVodRoomId = roomId;
+            openVodModal();
+
+            const listEl = document.getElementById('vodList');
+            listEl.innerHTML = '<div class="vod-empty">Loading...</div>';
+
+            try {
+                const response = await API.media.listVODs(roomId);
+                const sessions = response.sessions || [];
+
+                if (sessions.length === 0) {
+                    listEl.innerHTML = '<div class="vod-empty">No replays available</div>';
+                    return;
+                }
+
+                listEl.innerHTML = sessions.map(session => {
+                    const sessionId = session.session_id || session;
+                    const date = session.created_at
+                        ? new Date(session.created_at).toLocaleString('en-US')
+                        : '';
+                    return `
+                        <div class="vod-item" onclick="playVOD('${roomId}', '${sessionId}')">
+                            <div class="vod-item-info">
+                                <div class="vod-session-id">${sessionId}</div>
+                                ${date ? `<div class="vod-session-date">${date}</div>` : ''}
+                            </div>
+                            <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;">Play</button>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                listEl.innerHTML = `<div class="vod-empty">Load failed: ${error.message}</div>`;
+            }
+        }
+
+        function playVOD(roomId, sessionId) {
+            window.location.href = `viewer.html?room=${roomId}&vod=true&session=${sessionId}`;
+        }
+
+        // Initial load
+        loadMyRooms();
+        loadAllRooms();
+
+        // Auto refresh
+        setInterval(() => {
+            loadAllRooms();
+        }, 30000);
+    </script>
+</body>
+</html>

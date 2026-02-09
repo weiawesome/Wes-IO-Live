@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wes.IO Live - Live</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #7dd3fc;
+            --accent-dark: #38bdf8;
+            --accent-soft: rgba(125, 211, 252, 0.25);
+            --live-red: #fb7185;
+            --bg-dark: #0f172a;
+            --bg-card: rgba(30, 41, 59, 0.5);
+            --text-muted: #94a3b8;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        @keyframes gradient-shift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        @keyframes bubble-float {
+            0%, 100% { transform: translateY(100vh) scale(0); opacity: 0; }
+            10% { opacity: 0.4; }
+            90% { opacity: 0.25; }
+            100% { transform: translateY(-80px) scale(1); opacity: 0; }
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.1); }
+        }
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes live-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(251, 113, 133, 0); }
+        }
+
+        body {
+            font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #0f172a 100%);
+            background-size: 200% 200%;
+            animation: gradient-shift 14s ease infinite;
+            color: #e2e8f0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .bg-bubbles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .bg-bubbles span {
+            position: absolute;
+            bottom: -50px;
+            display: block;
+            width: 32px;
+            height: 32px;
+            background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+            border-radius: 50%;
+            animation: bubble-float 20s linear infinite;
+        }
+        .bg-bubbles span:nth-child(1) { left: 8%; animation-delay: 0s; }
+        .bg-bubbles span:nth-child(2) { left: 28%; animation-delay: 3s; width: 24px; height: 24px; }
+        .bg-bubbles span:nth-child(3) { left: 55%; animation-delay: 6s; width: 40px; height: 40px; animation-duration: 22s; }
+        .bg-bubbles span:nth-child(4) { left: 78%; animation-delay: 2s; }
+        .bg-bubbles span:nth-child(5) { left: 92%; animation-delay: 5s; width: 28px; height: 28px; }
+
+        .header {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            position: relative;
+            z-index: 10;
+            animation: fade-in-up 0.4s ease-out;
+        }
+        .header h1 {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+            color: #0f172a;
+            box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+        }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.45); }
+        .btn-primary:disabled { background: #475569; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-danger {
+            background: linear-gradient(135deg, var(--live-red) 0%, #e11d48 100%);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(251, 113, 133, 0.35);
+        }
+        .btn-danger:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(251, 113, 133, 0.45); }
+        .btn-danger:disabled { background: #475569; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); transform: translateY(-2px); }
+
+        .main {
+            display: flex;
+            height: calc(100vh - 58px);
+            position: relative;
+            z-index: 1;
+        }
+        .video-section {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            animation: fade-in-up 0.5s ease-out 0.1s both;
+        }
+        .video-container {
+            flex: 1;
+            background: #0f172a;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.4);
+            transition: box-shadow 0.3s ease;
+        }
+        .video-container:hover {
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(125, 211, 252, 0.1);
+        }
+        #preview {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .video-placeholder {
+            position: absolute;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .controls {
+            padding: 18px 0;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .sidebar {
+            width: 400px;
+            min-width: 400px;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-left: 1px solid rgba(255, 255, 255, 0.06);
+            overflow-y: auto;
+            animation: fade-in-up 0.5s ease-out 0.2s both;
+        }
+        .info-card {
+            background: var(--bg-card);
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: border-color 0.2s ease;
+        }
+        .info-card:hover {
+            border-color: rgba(125, 211, 252, 0.15);
+        }
+        .info-card h3 {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            gap: 12px;
+        }
+        .info-item:last-child { border-bottom: none; }
+        .info-label { color: var(--text-muted); font-weight: 600; font-size: 0.85rem; }
+        .info-value { color: #fff; font-weight: 600; word-break: break-word; }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .status-offline { background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.2); }
+        .status-offline .status-dot { background: #64748b; }
+        .status-connecting { background: rgba(251, 191, 36, 0.2); border: 1px solid rgba(251, 191, 36, 0.3); }
+        .status-connecting .status-dot { background: #fbbf24; animation: pulse-dot 1.2s ease-in-out infinite; }
+        .status-live {
+            background: rgba(251, 113, 133, 0.2);
+            border: 1px solid rgba(251, 113, 133, 0.3);
+            animation: live-pulse 2s ease-in-out infinite;
+        }
+        .status-live .status-dot { background: var(--live-red); }
+
+        .error-banner {
+            background: rgba(248, 113, 113, 0.15);
+            color: #fca5a5;
+            padding: 14px 18px;
+            margin: 16px 20px;
+            border-radius: 12px;
+            display: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            animation: fade-in-up 0.3s ease-out;
+        }
+        .error-banner.show { display: block; }
+
+        .viewer-count {
+            color: var(--accent);
+            font-weight: 800;
+        }
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 420px;
+            height: 480px;
+        }
+        .chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .btn-chat-reconnect {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border-radius: 8px;
+            background: rgba(125, 211, 252, 0.2);
+            color: var(--accent);
+            border: 1px solid rgba(125, 211, 252, 0.4);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-chat-reconnect:hover:not(:disabled) {
+            background: rgba(125, 211, 252, 0.3);
+            transform: translateY(-1px);
+        }
+        .btn-chat-reconnect:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        .chat-status {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+        .chat-status.connected { color: var(--accent); }
+        .chat-status.error {
+            color: #f87171;
+            cursor: pointer;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .chat-status.error:hover { color: #fca5a5; }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            -webkit-overflow-scrolling: touch;
+        }
+        .chat-message {
+            margin-bottom: 10px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: rgba(30, 41, 59, 0.6);
+            word-break: break-word;
+            transition: transform 0.2s ease;
+            animation: fade-in-up 0.25s ease-out;
+        }
+        .chat-message:hover { transform: translateX(2px); }
+        .chat-message.own { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.25); }
+        .chat-message .username {
+            color: var(--accent);
+            font-weight: 700;
+            margin-right: 8px;
+            font-size: 0.9rem;
+        }
+        .chat-message .content { color: #e2e8f0; font-size: 0.9rem; line-height: 1.45; }
+        .chat-message .time {
+            color: #64748b;
+            font-size: 0.75rem;
+            margin-left: 8px;
+        }
+        .chat-input-area {
+            display: flex;
+            gap: 10px;
+            padding-top: 12px;
+        }
+        .chat-input-area input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 2px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.6);
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .chat-input-area input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-soft);
+        }
+        .chat-input-area input::placeholder { color: #64748b; }
+        .chat-input-area button {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+            color: #0f172a;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+        }
+        .chat-input-area button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(56, 189, 248, 0.4); }
+        .chat-input-area button:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .btn-screen {
+            background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+        }
+        .btn-screen:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(124, 58, 237, 0.45);
+        }
+        .btn-screen:disabled {
+            background: #475569;
+            box-shadow: none;
+            transform: none;
+        }
+        .controls {
+            flex-wrap: wrap;
+        }
+
+        @media (max-width: 768px) {
+            .main { flex-direction: column; height: auto; min-height: calc(100vh - 58px); }
+            .video-section { padding: 12px; width: 100%; }
+            .video-container { border-radius: 12px; }
+            .sidebar {
+                width: 100%;
+                min-width: 0;
+                border-left: none;
+                border-top: 1px solid rgba(255, 255, 255, 0.06);
+                padding: 12px;
+                max-height: none;
+            }
+            .chat-panel { height: 50vh; min-height: 300px; max-height: 500px; }
+            .header-right { flex-wrap: wrap; gap: 10px; }
+            .btn { padding: 8px 16px; font-size: 0.85rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-bubbles">
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <header class="header">
+        <div>
+            <h1 id="roomTitle">Loading...</h1>
+        </div>
+        <div class="header-right">
+            <div id="status" class="status status-offline">
+                <span class="status-dot"></span>
+                <span>Offline</span>
+            </div>
+            <button class="btn btn-secondary" onclick="location.href='rooms.html'">Back to rooms</button>
+        </div>
+    </header>
+
+    <div id="errorBanner" class="error-banner"></div>
+
+    <div class="main">
+        <div class="video-section">
+            <div class="video-container">
+                <video id="preview" autoplay muted playsinline></video>
+                <span class="video-placeholder" id="placeholder">Choose Camera or Share Screen to start streaming</span>
+            </div>
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">Start Live (Camera)</button>
+                <button id="startScreenBtn" class="btn btn-screen">Share Screen</button>
+                <button id="stopBtn" class="btn btn-danger" disabled>Stop Live</button>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="info-card chat-panel">
+                <div class="chat-header">
+                    <h3>Chat</h3>
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span id="chatStatus" class="chat-status">Waiting for stream</span>
+                        <button type="button" id="chatReconnectBtn" class="btn-chat-reconnect" style="display: none;">Reconnect</button>
+                    </span>
+                </div>
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chatInput" placeholder="Type a message..." maxlength="500" disabled>
+                    <button id="chatSendBtn" disabled>Send</button>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h3>Stream Info</h3>
+                <div class="info-item">
+                    <span class="info-label">Viewers</span>
+                    <span class="info-value viewer-count" id="viewerCount">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Room status</span>
+                    <span class="info-value" id="roomStatus">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">WebRTC</span>
+                    <span class="info-value" id="webrtcStatus">Not connected</span>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h3>Connection</h3>
+                <div class="info-item">
+                    <span class="info-label">Signal server</span>
+                    <span class="info-value" id="signalStatus">Not connected</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Auth</span>
+                    <span class="info-value" id="authStatus">-</span>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h3>Upload quality</h3>
+                <div class="info-item">
+                    <span class="info-label">Resolution</span>
+                    <span class="info-value" id="sendResolution">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Frame rate</span>
+                    <span class="info-value" id="sendFramerate">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Bitrate</span>
+                    <span class="info-value" id="sendBitrate">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/signal.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/presence.js"></script>
+    <script>
+        // Check auth
+        if (!Auth.requireAuth()) {
+            throw new Error('Not authenticated');
+        }
+
+        // Safe token getter: use getValidToken if available, else getToken (avoids "getValidToken is not a function" when auth.js load fails)
+        async function getAuthToken() {
+            if (typeof Auth !== 'undefined' && typeof Auth.getValidToken === 'function') {
+                return await Auth.getValidToken();
+            }
+            if (typeof Auth !== 'undefined' && typeof Auth.getToken === 'function') {
+                return Auth.getToken();
+            }
+            return null;
+        }
+
+        // Get room ID from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
+        if (!roomId) {
+            alert('Missing room ID');
+            window.location.href = 'rooms.html';
+            throw new Error('Missing room ID');
+        }
+
+        // DOM elements
+        const preview = document.getElementById('preview');
+        const placeholder = document.getElementById('placeholder');
+        const startBtn = document.getElementById('startBtn');
+        const startScreenBtn = document.getElementById('startScreenBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const errorBanner = document.getElementById('errorBanner');
+        const chatStatusEl = document.getElementById('chatStatus');
+        const chatMessagesEl = document.getElementById('chatMessages');
+        const chatInputEl = document.getElementById('chatInput');
+        const chatSendBtn = document.getElementById('chatSendBtn');
+        const chatReconnectBtn = document.getElementById('chatReconnectBtn');
+
+        // State
+        let peerConnection = null;
+        let localStream = null;
+        let isLive = false;
+        let statsInterval = null;
+        let chatSessionId = null;
+        let chatJoined = false;
+        let chatInitialized = false;
+        
+        // Detect mobile device
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                        (window.innerWidth <= 768);
+        
+        // Check if HTTPS or localhost (informational only, not blocking)
+        const isSecureContext = window.isSecureContext || 
+                               window.location.protocol === 'https:' || 
+                               window.location.hostname === 'localhost' || 
+                               window.location.hostname === '127.0.0.1' ||
+                               window.location.hostname === '0.0.0.0';
+
+        // Status functions
+        function setStatus(status, text) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = `status status-${status}`;
+            statusEl.querySelector('span:last-child').textContent = text;
+        }
+
+        function showError(message) {
+            errorBanner.textContent = message;
+            errorBanner.classList.add('show');
+        }
+
+        function hideError() {
+            errorBanner.classList.remove('show');
+        }
+
+        function updateInfo(id, value) {
+            document.getElementById(id).textContent = value;
+        }
+
+        function updateChatStatus(text, className = '') {
+            chatStatusEl.textContent = text;
+            chatStatusEl.className = `chat-status ${className}`.trim();
+            if (className.includes('error') && chatSessionId && chatReconnectBtn) {
+                chatReconnectBtn.style.display = 'inline-block';
+            }
+        }
+
+        function enableChatInput(enabled) {
+            chatInputEl.disabled = !enabled;
+            chatSendBtn.disabled = !enabled;
+        }
+
+        function scrollChatToBottom() {
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatMessageTime(message) {
+            const raw = message.timestamp || message.created_at;
+            const date = raw ? new Date(raw) : new Date();
+            if (Number.isNaN(date.getTime())) {
+                return '';
+            }
+            return date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function appendChatMessage(message, shouldScroll = true) {
+            const item = document.createElement('div');
+            const isOwn = message.user_id && message.user_id === Chat.getState().userId;
+            item.className = `chat-message${isOwn ? ' own' : ''}`;
+
+            const timeText = formatMessageTime(message);
+            item.innerHTML = `
+                <span class="username">${escapeHtml(message.username || 'Unknown')}</span>
+                <span class="content">${escapeHtml(message.content || '')}</span>
+                <span class="time">${timeText}</span>
+            `;
+
+            chatMessagesEl.appendChild(item);
+            if (shouldScroll) {
+                scrollChatToBottom();
+            }
+        }
+
+        function parseSessionIdFromHls(hlsUrlValue) {
+            if (!hlsUrlValue) return '';
+            try {
+                const url = new URL(hlsUrlValue, window.location.origin);
+                const parts = url.pathname.split('/');
+                if (parts.length >= 4 && parts[1] === 'live') {
+                    return parts[3];
+                }
+            } catch (e) {
+                console.warn('Failed to parse HLS URL:', e);
+            }
+            return '';
+        }
+
+        async function loadChatHistory() {
+            if (!chatSessionId) return;
+            try {
+                const response = await API.Chat.getHistory(roomId, chatSessionId, {
+                    limit: 50,
+                    direction: 'backward'
+                });
+
+                if (response && response.success && response.data && response.data.messages) {
+                    const messages = response.data.messages.slice().reverse();
+                    messages.forEach(msg => appendChatMessage(msg, false));
+                    scrollChatToBottom();
+                }
+            } catch (error) {
+                console.warn('Failed to load chat history:', error);
+            }
+        }
+
+        async function initChat(sessionId) {
+            if (!sessionId || chatJoined || chatInitialized) return;
+            chatInitialized = true;
+            chatSessionId = sessionId;
+
+            try {
+                await Chat.connect();
+                updateChatStatus('Connecting...', 'connected');
+                const token = await getAuthToken();
+                if (!token) {
+                    updateChatStatus('No valid token', 'error');
+                    showError('Could not get valid token, please sign in again');
+                    chatInitialized = false;
+                    return;
+                }
+                Chat.authenticate(token);
+            } catch (error) {
+                updateChatStatus('Connection failed', 'error');
+                chatInitialized = false;
+                return;
+            }
+
+            Chat.on('auth_result', (msg) => {
+                if (msg.success) {
+                    updateChatStatus('Authenticated', 'connected');
+                    Chat.joinRoom(roomId, chatSessionId);
+                } else {
+                    updateChatStatus('Auth failed', 'error');
+                    if (chatReconnectBtn) chatReconnectBtn.disabled = false;
+                }
+            });
+
+            Chat.on('room_joined', async () => {
+                chatJoined = true;
+                updateChatStatus('Connected', 'connected');
+                if (chatReconnectBtn) chatReconnectBtn.style.display = 'none';
+                enableChatInput(true);
+                await loadChatHistory();
+            });
+
+            Chat.on('chat_message', (msg) => {
+                appendChatMessage(msg);
+            });
+
+            Chat.on('error', (msg) => {
+                updateChatStatus(`Error: ${msg.message || msg.code}`, 'error');
+            });
+
+            Chat.on('disconnected', () => {
+                updateChatStatus('Disconnected', 'error');
+                enableChatInput(false);
+                chatJoined = false;
+                if (chatReconnectBtn) {
+                    chatReconnectBtn.style.display = chatSessionId ? 'inline-block' : 'none';
+                    chatReconnectBtn.disabled = false;
+                }
+            });
+        }
+
+        async function reconnectChat() {
+            if (!chatSessionId || !chatReconnectBtn) return;
+            chatReconnectBtn.disabled = true;
+            updateChatStatus('Reconnecting...', 'connected');
+            try {
+                Chat.disconnect();
+                await Chat.connect();
+                const token = await getAuthToken();
+                if (!token) {
+                    updateChatStatus('No valid token', 'error');
+                    chatReconnectBtn.disabled = false;
+                    return;
+                }
+                Chat.authenticate(token);
+                Chat.joinRoom(roomId, chatSessionId);
+            } catch (err) {
+                console.error('Chat reconnect error:', err);
+                updateChatStatus('Reconnect failed', 'error');
+                chatReconnectBtn.disabled = false;
+            }
+        }
+
+        function sendChatMessage() {
+            const content = chatInputEl.value.trim();
+            if (!content) return;
+            if (Chat.sendMessage(content)) {
+                chatInputEl.value = '';
+            }
+        }
+
+        // Load room info
+        async function loadRoom() {
+            try {
+                const response = await API.rooms.get(roomId);
+                const room = response.data;
+                document.getElementById('roomTitle').textContent = room.title;
+                updateInfo('viewerCount', room.viewer_count);
+                updateInfo('roomStatus', room.status === 'active' ? 'Active' : room.status);
+            } catch (error) {
+                showError('Failed to load room: ' + error.message);
+            }
+        }
+
+        // Connect to signal server
+        async function connectSignal() {
+            updateInfo('signalStatus', 'Connecting...');
+
+            try {
+                await Signal.connect();
+                updateInfo('signalStatus', 'Connected');
+
+                // Use valid token (refresh if expired) to avoid WS auth failure
+                updateInfo('authStatus', 'Authenticating...');
+                const token = await getAuthToken();
+                if (!token) {
+                    showError('Could not get valid token, please sign in again');
+                    return;
+                }
+                Signal.authenticate(token);
+
+                // Set up event handlers
+                Signal.on('auth_result', (msg) => {
+                    if (msg.success) {
+                        updateInfo('authStatus', 'Authenticated');
+                        // Join room after auth
+                        Signal.joinRoom(roomId);
+                    } else {
+                        updateInfo('authStatus', 'Auth failed');
+                        showError('Authentication failed: ' + msg.message);
+                    }
+                });
+
+                Signal.on('room_joined', (msg) => {
+                    console.log('Room joined:', msg);
+                    updateInfo('viewerCount', msg.viewer_count);
+                    if (msg.is_live) {
+                        setStatus('live', 'Live');
+                        isLive = true;
+                    }
+                });
+
+                Signal.on('stream_available', (msg) => {
+                    if (!msg.hls_url) return;
+                    const parsedSession = parseSessionIdFromHls(msg.hls_url);
+                    if (parsedSession) {
+                        initChat(parsedSession);
+                    }
+                });
+
+                Signal.on('broadcast_started', async (msg) => {
+                    console.log('Broadcast started, setting answer:', msg);
+                    try {
+                        await peerConnection.setRemoteDescription({
+                            type: 'answer',
+                            sdp: msg.answer.sdp
+                        });
+                        updateInfo('webrtcStatus', 'Connected');
+                    } catch (e) {
+                        console.error('Failed to set answer:', e);
+                        showError('Failed to set SDP answer');
+                    }
+                });
+
+                Signal.on('ice_candidate', async (msg) => {
+                    // Handle ICE candidates from server (if trickle ICE is used)
+                    if (peerConnection && msg.candidate) {
+                        try {
+                            await peerConnection.addIceCandidate(msg.candidate);
+                            console.log('Added server ICE candidate');
+                        } catch (e) {
+                            console.warn('Failed to add ICE candidate:', e);
+                        }
+                    }
+                });
+
+                // Note: viewer_count is now handled by presence service
+                // Signal.on('viewer_count', (msg) => {
+                //     updateInfo('viewerCount', msg.count);
+                // });
+
+                Signal.on('error', (msg) => {
+                    showError(`Error (${msg.code}): ${msg.message}`);
+                });
+
+                Signal.on('disconnected', () => {
+                    updateInfo('signalStatus', 'Disconnected');
+                    updateInfo('authStatus', '-');
+                });
+
+            } catch (error) {
+                updateInfo('signalStatus', 'Connection failed');
+                showError('Failed to connect to signal server');
+            }
+        }
+
+        // Start broadcast (useScreenShare: true = screen share, false = camera)
+        async function startBroadcast(useScreenShare = false) {
+            hideError();
+            startBtn.disabled = true;
+            startScreenBtn.disabled = true;
+            setStatus('connecting', useScreenShare ? 'Select screen to share...' : 'Preparing...');
+
+            if (!isSecureContext) {
+                if (isMobile) {
+                    console.warn('Using HTTP; some mobile browsers may not support it. Consider using HTTPS');
+                } else {
+                    console.warn('Using HTTP; consider HTTPS or localhost');
+                }
+            }
+
+            if (!navigator.mediaDevices) {
+                showError('Your browser does not support media devices');
+                startBtn.disabled = false;
+                startScreenBtn.disabled = false;
+                setStatus('offline', 'Offline');
+                return;
+            }
+
+            try {
+                placeholder.style.display = 'none';
+
+                if (useScreenShare) {
+                    // Screen share: getDisplayMedia (optional system/mic audio)
+                    if (!navigator.mediaDevices.getDisplayMedia) {
+                        showError('Your browser does not support screen sharing');
+                        startBtn.disabled = false;
+                        startScreenBtn.disabled = false;
+                        setStatus('offline', 'Offline');
+                        placeholder.style.display = 'block';
+                        return;
+                    }
+                    localStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+                        audio: true
+                    });
+                    // If no shared audio, optionally add microphone
+                    if (!localStream.getAudioTracks().length) {
+                        try {
+                            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            audioStream.getAudioTracks().forEach(t => localStream.addTrack(t));
+                        } catch (_) {}
+                    }
+                    localStream.getVideoTracks()[0].onended = () => {
+                        if (isLive) {
+                            stopBroadcast();
+                            showError('Screen share stopped');
+                        }
+                    };
+                } else {
+                    // Camera: getUserMedia
+                    if (!navigator.mediaDevices.getUserMedia) {
+                        showError('Your browser does not support camera access');
+                        startBtn.disabled = false;
+                        startScreenBtn.disabled = false;
+                        setStatus('offline', 'Offline');
+                        placeholder.style.display = 'block';
+                        return;
+                    }
+                    const videoConstraints = isMobile ? {
+                        width:  { ideal: 960,  min: 640 },
+                        height: { ideal: 540,  min: 480 },
+                        frameRate: { ideal: 60, max: 30 },
+                        facingMode: 'user'
+                    } : {
+                        width:  { ideal: 1920, min: 1280 },
+                        height: { ideal: 1080,  min: 720 },
+                        frameRate: { ideal: 60, max: 30 },
+                        facingMode: 'user'
+                    };
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: videoConstraints,
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    });
+                }
+
+                preview.srcObject = localStream;
+                
+                // Log actual video settings
+                const videoTrack = localStream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                console.log('Video settings:', {
+                    width: settings.width,
+                    height: settings.height,
+                    frameRate: settings.frameRate,
+                    deviceId: settings.deviceId
+                });
+
+
+                // Get ICE servers from media service (includes TURN if configured)
+                const iceServers = await API.media.getICEServers();
+                console.log('ICE servers:', iceServers);
+
+                // Create peer connection with proper ICE servers
+                peerConnection = new RTCPeerConnection({ iceServers });
+
+                // Add tracks with encoding parameters to maintain quality
+                let videoSender = null;
+                localStream.getTracks().forEach(track => {
+                    if (track.kind === 'video') {
+                        // Use addTransceiver to set encoding parameters
+                        const transceiver = peerConnection.addTransceiver(track, {
+                            direction: 'sendonly',
+                            streams: [localStream]
+                        });
+                        
+                        videoSender = transceiver.sender;
+                        
+                        // Set encoding parameters after connection is established
+                        const applyEncodingParams = async () => {
+                            try {
+                                const params = videoSender.getParameters();
+                                if (!params.encodings) {
+                                    params.encodings = [{}];
+                                }
+                                
+                                // Set higher bitrate for quality (160 Mbps uplink is enough)
+                                // 720p + 3-4 Mbps = good and stable
+                                if (isMobile) {
+                                    params.encodings[0].minBitrate = 2000000; // 2 Mbps minimum
+                                    params.encodings[0].maxBitrate = 4000000; // 4 Mbps maximum
+                                } else {
+                                    params.encodings[0].minBitrate = 3000000; // 3 Mbps minimum
+                                    params.encodings[0].maxBitrate = 5000000; // 5 Mbps maximum
+                                }
+                                params.encodings[0].maxFramerate = 30;
+                                params.encodings[0].scaleResolutionDownBy = 1.0; // no downscale
+                                
+                                await videoSender.setParameters(params);
+                                console.log('Encoding parameters applied:', {
+                                    minBitrate: params.encodings[0].minBitrate,
+                                    maxBitrate: params.encodings[0].maxBitrate,
+                                    maxFramerate: params.encodings[0].maxFramerate
+                                });
+                            } catch (err) {
+                                console.warn('Failed to set encoding parameters:', err);
+                            }
+                        };
+                        
+                        // Apply parameters when connection is established
+                        peerConnection.addEventListener('connectionstatechange', async () => {
+                            if (peerConnection.connectionState === 'connected' && videoSender) {
+                                await applyEncodingParams();
+                                
+                                // Monitor and maintain quality every 3 seconds
+                                const qualityMonitor = setInterval(async () => {
+                                    if (peerConnection.connectionState !== 'connected') {
+                                        clearInterval(qualityMonitor);
+                                        return;
+                                    }
+                                    
+                                    try {
+                                        const params = videoSender.getParameters();
+                                        if (params.encodings && params.encodings[0]) {
+                                            const currentMax = params.encodings[0].maxBitrate || 0;
+                                            const currentMin = params.encodings[0].minBitrate || 0;
+                                            const targetMin = isMobile ? 2000000 : 3000000;
+                                            const targetMax = isMobile ? 4000000 : 5000000;
+                                            
+                                            // If bitrate was reduced, restore it
+                                            if (currentMax < targetMax * 0.8 || currentMin < targetMin * 0.8) {
+                                                console.log('Quality degraded detected, restoring...');
+                                                await applyEncodingParams();
+                                            }
+                                        }
+                                    } catch (err) {
+                                        console.warn('Quality monitor error:', err);
+                                    }
+                                }, 3000);
+                            }
+                        });
+                        
+                    } else {
+                        // Audio track
+                        peerConnection.addTrack(track, localStream);
+                    }
+                });
+
+                // Note: We use full ICE gathering (not trickle ICE)
+                // All ICE candidates are included in the SDP offer/answer
+                // So we don't need to send ICE candidates separately
+
+                // Connection state
+                peerConnection.onconnectionstatechange = () => {
+                    const state = peerConnection.connectionState;
+                    console.log('Connection state:', state);
+                    updateInfo('webrtcStatus', state);
+
+                    switch (state) {
+                        case 'connected':
+                            setStatus('live', 'Live');
+                            stopBtn.disabled = false;
+                            isLive = true;
+                            // Start monitoring statistics
+                            startStatsMonitoring();
+                            break;
+                        case 'failed':
+                            setStatus('offline', 'Connection failed');
+                            showError('WebRTC connection failed');
+                            break;
+                        case 'disconnected':
+                            setStatus('offline', 'Disconnected');
+                            break;
+                    }
+                };
+                
+                // Statistics monitoring function
+                let lastBytesSent = 0;
+                let lastTimestamp = 0;
+                function startStatsMonitoring() {
+                    if (statsInterval) return;
+                    
+                    statsInterval = setInterval(async () => {
+                        if (!peerConnection || peerConnection.connectionState !== 'connected') {
+                            if (statsInterval) {
+                                clearInterval(statsInterval);
+                                statsInterval = null;
+                            }
+                            return;
+                        }
+                        
+                        try {
+                            const stats = await peerConnection.getStats();
+                            let videoBitrate = 0;
+                            let videoFramerate = 0;
+                            let videoResolution = '';
+                            
+                            stats.forEach(report => {
+                                if (report.type === 'outbound-rtp' && report.mediaType === 'video') {
+                                    // Calculate bitrate from bytes difference
+                                    if (report.bytesSent && report.timestamp) {
+                                        if (lastTimestamp > 0 && lastBytesSent > 0) {
+                                            const bytesDiff = report.bytesSent - lastBytesSent;
+                                            const timeDiff = (report.timestamp - lastTimestamp) / 1000; // seconds
+                                            if (timeDiff > 0) {
+                                                videoBitrate = ((bytesDiff / timeDiff) * 8 / 1000000).toFixed(2); // Mbps
+                                            }
+                                        }
+                                        lastBytesSent = report.bytesSent;
+                                        lastTimestamp = report.timestamp;
+                                    }
+                                    if (report.framesPerSecond) {
+                                        videoFramerate = report.framesPerSecond.toFixed(1);
+                                    }
+                                    if (report.frameWidth && report.frameHeight) {
+                                        videoResolution = `${report.frameWidth}x${report.frameHeight}`;
+                                    }
+                                }
+                            });
+                            
+                            // Update sidebar quality info
+                            if (videoResolution) {
+                                updateInfo('sendResolution', videoResolution);
+                            }
+                            if (videoFramerate) {
+                                updateInfo('sendFramerate', videoFramerate + ' fps');
+                            }
+                            if (videoBitrate > 0) {
+                                updateInfo('sendBitrate', videoBitrate + ' Mbps');
+
+                                // Log statistics for debugging
+                                console.log(`Video stats: ${videoBitrate} Mbps, ${videoFramerate} fps, ${videoResolution}`);
+                                
+                                // Warn if bitrate is too low
+                                if (parseFloat(videoBitrate) < 2) {
+                                    console.warn('Low bitrate detected:', videoBitrate, 'Mbps - quality may be degraded');
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('Failed to get stats:', err);
+                        }
+                    }, 3000); // Update every 3 seconds
+                }
+
+                // Create offer
+                setStatus('connecting', 'Connecting...');
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                // Wait for ICE gathering
+                await new Promise(resolve => {
+                    if (peerConnection.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        peerConnection.onicegatheringstatechange = () => {
+                            if (peerConnection.iceGatheringState === 'complete') {
+                                resolve();
+                            }
+                        };
+                        setTimeout(resolve, 3000);
+                    }
+                });
+
+                // Send offer to signal server
+                Signal.startBroadcast(roomId, {
+                    type: 'offer',
+                    sdp: peerConnection.localDescription.sdp
+                });
+
+            } catch (error) {
+                console.error('Broadcast error:', error);
+                
+                // Provide helpful error messages for common issues
+                let errorMessage = 'Failed to start stream: ';
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    errorMessage += 'Please allow camera and microphone access';
+                } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+                    errorMessage += 'No camera or microphone found';
+                } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+                    errorMessage += 'Camera or microphone is in use by another app';
+                } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+                    errorMessage += 'Device does not support requested video settings, try lowering quality';
+                } else if (error.name === 'SecurityError' || error.message.includes('secure context')) {
+                    if (isMobile) {
+                        errorMessage += 'Mobile browsers require HTTPS to access camera';
+                    } else {
+                        errorMessage += 'Browser security requires HTTPS or localhost';
+                    }
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                showError(errorMessage);
+                startBtn.disabled = false;
+                startScreenBtn.disabled = false;
+                setStatus('offline', 'Offline');
+                placeholder.style.display = 'block';
+            }
+        }
+
+        // Stop broadcast
+        function stopBroadcast() {
+            // Clear statistics monitoring
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            preview.srcObject = null;
+            placeholder.style.display = 'block';
+
+            Signal.stopBroadcast(roomId);
+
+            startBtn.disabled = false;
+            startScreenBtn.disabled = false;
+            stopBtn.disabled = true;
+            isLive = false;
+            setStatus('offline', 'Offline');
+            updateInfo('webrtcStatus', 'Not connected');
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', () => startBroadcast(false));
+        startScreenBtn.addEventListener('click', () => startBroadcast(true));
+        stopBtn.addEventListener('click', stopBroadcast);
+
+        // Show device info
+        if (isMobile) {
+            console.log('Mobile device detected; video params adjusted for performance');
+            if (!isSecureContext) {
+                console.log('Tip: some mobile browsers may not allow camera over HTTP; use HTTPS');
+            }
+        } else if (!isSecureContext) {
+            console.log('Using HTTP; desktop usually works but HTTPS or localhost is recommended');
+        }
+        
+        // Connect to presence service for viewer count
+        async function connectPresence() {
+            try {
+                await Presence.connect();
+
+                // Get token for authenticated presence
+                const token = await getAuthToken();
+
+                // Join room with authentication
+                Presence.joinRoom(roomId, token, null);
+
+                Presence.on('joined', (msg) => {
+                    console.log('Presence joined:', msg);
+                    updateInfo('viewerCount', msg.count.total);
+                });
+
+                Presence.on('count', (msg) => {
+                    updateInfo('viewerCount', msg.count.total);
+                });
+
+                Presence.on('error', (msg) => {
+                    console.error('Presence error:', msg.message);
+                });
+
+                Presence.on('disconnected', () => {
+                    console.log('Presence disconnected');
+                });
+
+            } catch (error) {
+                console.error('Presence connection error:', error);
+            }
+        }
+
+        // Initialize
+        loadRoom();
+        connectSignal();
+        connectPresence();
+        updateChatStatus('Waiting for stream', '');
+
+        // Heartbeat
+        setInterval(() => {
+            if (Signal.ws && Signal.ws.readyState === WebSocket.OPEN) {
+                Signal.ping();
+            }
+        }, 30000);
+
+        // Chat: click status text to reconnect
+        chatStatusEl.addEventListener('click', () => {
+            if (chatSessionId && !Chat.getState().connected) reconnectChat();
+        });
+        chatSendBtn.addEventListener('click', sendChatMessage);
+        if (chatReconnectBtn) chatReconnectBtn.addEventListener('click', reconnectChat);
+        chatInputEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChatMessage();
+        });
+
+        // Cleanup on leave
+        window.addEventListener('beforeunload', () => {
+            stopBroadcast();
+            if (roomId) {
+                Presence.leaveRoom(roomId);
+            }
+            Signal.disconnect();
+            Chat.disconnect();
+            Presence.disconnect();
+        });
+    </script>
+</body>
+</html>
