@@ -1,0 +1,21 @@
+go 1.24.3
+
+use (
+	./auth-service
+	./chat-dispatcher
+	./chat-history-service
+	./chat-persist-service
+	./chat-service
+	./ice-service
+	./id-service
+	./media-service
+	./pkg
+	./playback-service
+	./presence-service
+	./proto/auth
+	./proto/chat
+	./proto/id
+	./room-service
+	./signal-service
+	./user-service
+)
