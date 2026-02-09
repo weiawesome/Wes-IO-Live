@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -94,6 +96,14 @@ func Load() (*Config, error) {
 	// Parse durations
 	cfg.Cassandra.ConnectTimeout = parseDuration(v, "cassandra.connect_timeout", 10*time.Second)
 	cfg.Cassandra.Timeout = parseDuration(v, "cassandra.timeout", 5*time.Second)
+
+	// CASSANDRA_HOSTS: comma-separated, e.g. "cassandra:9042" or "host1:9042,host2:9042"
+	if v := os.Getenv("CASSANDRA_HOSTS"); v != "" {
+		cfg.Cassandra.Hosts = strings.Split(strings.TrimSpace(v), ",")
+		for i, h := range cfg.Cassandra.Hosts {
+			cfg.Cassandra.Hosts[i] = strings.TrimSpace(h)
+		}
+	}
 
 	return &cfg, nil
 }

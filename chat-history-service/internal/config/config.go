@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -57,6 +59,13 @@ func Load(configPath string) (*Config, error) {
 	viper.SetDefault("cache.ttl", "30s")
 	viper.SetDefault("log.level", "info")
 
+	// Env overrides (for Docker)
+	_ = viper.BindEnv("server.port", "PORT")
+	_ = viper.BindEnv("cassandra.hosts", "CASSANDRA_HOSTS")
+	_ = viper.BindEnv("cassandra.keyspace", "CASSANDRA_KEYSPACE")
+	_ = viper.BindEnv("redis.address", "REDIS_ADDRESS")
+	_ = viper.BindEnv("redis.password", "REDIS_PASSWORD")
+
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err
 	}
@@ -64,6 +73,14 @@ func Load(configPath string) (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
+	}
+
+	// CASSANDRA_HOSTS: comma-separated, e.g. "cassandra:9042" or "host1:9042,host2:9042"
+	if v := os.Getenv("CASSANDRA_HOSTS"); v != "" {
+		cfg.Cassandra.Hosts = strings.Split(strings.TrimSpace(v), ",")
+		for i, h := range cfg.Cassandra.Hosts {
+			cfg.Cassandra.Hosts[i] = strings.TrimSpace(h)
+		}
 	}
 
 	return &cfg, nil

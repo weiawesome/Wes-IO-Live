@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24.3-alpine AS builder
 
 WORKDIR /app
 
@@ -8,8 +8,9 @@ COPY pkg/ ./pkg/
 COPY proto/ ./proto/
 COPY id-service/ ./id-service/
 
-# Build
+# Build (GOWORK=off: use go.mod only, not go.work - Docker only copies needed modules)
 WORKDIR /app/id-service
+ENV GOWORK=off
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -o /id-service ./cmd/main.go
 

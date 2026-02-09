@@ -1,4 +1,6 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24.3-alpine AS builder
+
+RUN apk add --no-cache gcc musl-dev pkgconf librdkafka-dev
 
 WORKDIR /app
 
@@ -8,14 +10,15 @@ COPY pkg/ ./pkg/
 COPY proto/ ./proto/
 COPY signal-service/ ./signal-service/
 
-# Build
+# Build (GOWORK=off: use go.mod only, not go.work - Docker only copies needed modules)
 WORKDIR /app/signal-service
+ENV GOWORK=off
 RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /signal-service ./cmd/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -tags musl -o /signal-service ./cmd/main.go
 
 FROM alpine:3.19
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata librdkafka
 
 WORKDIR /app
 
