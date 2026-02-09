@@ -1,0 +1,17 @@
+grpc:
+  host: "0.0.0.0"
+  port: 50053
+
+snowflake:
+  machine_id: 1         # 0-1023
+  epoch: 1704067200000  # 2024-01-01T00:00:00Z in ms
+
+nanoid:
+  size: 21
+  alphabet: "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+cuid2:
+  length: 24
+
+log:
+  level: "info"

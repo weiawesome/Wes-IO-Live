@@ -1,0 +1,230 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/weiawesome/wes-io-live/pkg/middleware"
+	"github.com/weiawesome/wes-io-live/pkg/response"
+	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
+	"github.com/weiawesome/wes-io-live/user-service/internal/repository"
+	"github.com/weiawesome/wes-io-live/user-service/internal/service"
+)
+
+// Handler handles HTTP requests for user service.
+type Handler struct {
+	userService    service.UserService
+	authMiddleware *middleware.AuthMiddleware
+}
+
+// NewHandler creates a new HTTP handler.
+func NewHandler(userService service.UserService, authMiddleware *middleware.AuthMiddleware) *Handler {
+	return &Handler{
+		userService:    userService,
+		authMiddleware: authMiddleware,
+	}
+}
+
+// RegisterRoutes registers all routes.
+func (h *Handler) RegisterRoutes(r *gin.Engine) {
+	api := r.Group("/api/v1")
+	{
+		// Public routes
+		auth := api.Group("/auth")
+		{
+			auth.POST("/register", h.Register)
+			auth.POST("/login", h.Login)
+			auth.POST("/refresh", h.RefreshToken)
+			auth.POST("/logout", h.authMiddleware.RequireAuth(), h.Logout)
+		}
+
+		// Protected routes
+		users := api.Group("/users")
+		users.Use(h.authMiddleware.RequireAuth())
+		{
+			users.GET("/me", h.GetMe)
+			users.PUT("/me", h.UpdateMe)
+			users.PUT("/me/password", h.ChangePassword)
+			users.DELETE("/me", h.DeleteMe)
+		}
+	}
+}
+
+// Register handles user registration.
+func (h *Handler) Register(c *gin.Context) {
+	var req domain.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.userService.Register(c.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, repository.ErrEmailExists) {
+			response.Conflict(c, "email already exists")
+			return
+		}
+		if errors.Is(err, repository.ErrUsernameExists) {
+			response.Conflict(c, "username already exists")
+			return
+		}
+		response.InternalError(c, "failed to register user")
+		return
+	}
+
+	response.Created(c, result)
+}
+
+// Login handles user login.
+func (h *Handler) Login(c *gin.Context) {
+	var req domain.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.userService.Login(c.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			response.Unauthorized(c, "invalid email or password")
+			return
+		}
+		response.InternalError(c, "failed to login")
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// RefreshToken handles token refresh.
+func (h *Handler) RefreshToken(c *gin.Context) {
+	var req domain.RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.userService.RefreshToken(c.Request.Context(), &req)
+	if err != nil {
+		response.Unauthorized(c, "invalid or expired refresh token")
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// Logout handles user logout.
+func (h *Handler) Logout(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	if err := h.userService.Logout(c.Request.Context(), userID); err != nil {
+		response.InternalError(c, "failed to logout")
+		return
+	}
+
+	response.Success(c, gin.H{"message": "logged out successfully"})
+}
+
+// GetMe returns current user info.
+func (h *Handler) GetMe(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	user, err := h.userService.GetUser(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		response.InternalError(c, "failed to get user")
+		return
+	}
+
+	response.Success(c, user)
+}
+
+// UpdateMe updates current user.
+func (h *Handler) UpdateMe(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	var req domain.UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	user, err := h.userService.UpdateUser(c.Request.Context(), userID, &req)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		response.InternalError(c, "failed to update user")
+		return
+	}
+
+	response.Success(c, user)
+}
+
+// ChangePassword changes current user's password.
+func (h *Handler) ChangePassword(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	var req domain.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	if err := h.userService.ChangePassword(c.Request.Context(), userID, &req); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		if errors.Is(err, service.ErrWrongPassword) {
+			response.BadRequest(c, "current password is incorrect")
+			return
+		}
+		response.InternalError(c, "failed to change password")
+		return
+	}
+
+	response.Success(c, gin.H{"message": "password changed successfully"})
+}
+
+// DeleteMe deletes current user.
+func (h *Handler) DeleteMe(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	if err := h.userService.DeleteUser(c.Request.Context(), userID); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		response.InternalError(c, "failed to delete user")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}

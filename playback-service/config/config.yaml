@@ -1,0 +1,35 @@
+server:
+  host: "0.0.0.0"
+  port: 8087
+
+storage:
+  type: "s3"              # "local" or "s3"
+  local:
+    base_path: "../media-service/hls"   # Point to media-service HLS directory (for local mode)
+  s3:
+    # Copy these settings from media-service/config/config.yaml
+    endpoint: "http://localhost:9000"   # MinIO endpoint
+    region: "us-east-1"
+    bucket: "vod"
+    access_key_id: "minioadmin"         # Or use S3_ACCESS_KEY_ID env var
+    secret_access_key: "minioadmin"     # Or use S3_SECRET_ACCESS_KEY env var
+    use_path_style: true                # Required for MinIO
+    public_url: ""
+
+playback:
+  access_mode: "proxy"    # "redirect" or "proxy"
+  presign_expiry: 3600    # seconds, for redirect mode
+  # For S3 storage: media-service uploads to vod/room_{roomID}/{sessionID}/
+  live_prefix: "vod"      # S3 prefix for live HLS
+  vod_prefix: "vod"       # S3 prefix for VOD
+
+session:
+  type: "redis"           # "none", "memory", or "redis"
+  redis:
+    address: "localhost:6379"   # Connect to Redis to get active session info
+    password: ""
+    db: 1
+    key_prefix: "vod:session:"
+
+log:
+  level: "info"
