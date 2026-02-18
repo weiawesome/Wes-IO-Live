@@ -3,7 +3,6 @@ services:
     image: cassandra:5.0.6
     container_name: cassandra
     hostname: cassandra
-    restart: always
 
     ports:
       - "9042:9042"   # CQL
@@ -18,6 +17,12 @@ services:
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       CASSANDRA_NUM_TOKENS: 256
       CASSANDRA_START_RPC: "true"
+
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'SELECT release_version FROM system.local'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
     volumes:
       - cassandra_data:/var/lib/cassandra
@@ -46,10 +51,15 @@ services:
       - "29092:29092"
       - "29093:29093"
       # - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --list --bootstrap-server kafka:29092"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
     volumes:
       - kafka_data:/var/lib/kafka/data
       - kafka_secrets:/etc/kafka/secrets
-    restart: always
       
   postgres:
     image: postgres:16-alpine
@@ -96,6 +106,55 @@ services:
       timeout: 5s
       retries: 5
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.11
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.11
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  fluent-bit:
+    image: fluent/fluent-bit:4.2.2
+    ports:
+      - "24224:24224"
+      - "2020:2020"
+    volumes:
+      - ./fluent-bit/conf/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/conf/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    healthcheck:
+      test: ["CMD", "/fluent-bit/bin/fluent-bit", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - elasticsearch
+
   auth-service:
     build:
       context: .
@@ -107,8 +166,18 @@ services:
     ports:
       - "50051:50051"
     depends_on:
-      postgres:
+      fluent-bit:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50051 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.auth-service    
 
   user-service:
     build:
@@ -123,11 +192,26 @@ services:
       - DB_NAME=postgres
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - AUTH_SERVICE_GRPC=${AUTH_SERVICE_GRPC:-auth-service:50051}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8082:8082"
     depends_on:
-      - auth-service
-      - postgres
+      auth-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8082 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.user-service
 
   room-service:
     build:
@@ -143,11 +227,26 @@ services:
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - AUTH_SERVICE_GRPC=${AUTH_SERVICE_GRPC:-auth-service:50051}
       - MAX_ROOMS_PER_USER=${MAX_ROOMS_PER_USER:-3}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8083:8083"
     depends_on:
-      - auth-service
-      - postgres
+      auth-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8083 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.room-service
 
   signal-service:
     build:
@@ -163,13 +262,25 @@ services:
       - "8084:8084"
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       auth-service:
         condition: service_started
       room-service:
         condition: service_started
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8084 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.signal-service
 
   media-service:
     build:
@@ -195,11 +306,23 @@ services:
       - hls_data:/app/hls
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8085 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.media-service
 
   ice-service:
     build:
@@ -209,9 +332,22 @@ services:
       - PORT=8086
       - CF_TURN_ID=${CF_TURN_ID:-}
       - CF_TURN_KEY=${CF_TURN_KEY:-}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8086:8086"
-
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8086 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.ice-service
   playback-service:
     build:
       context: .
@@ -227,6 +363,7 @@ services:
       - S3_PUBLIC_URL=${S3_PUBLIC_URL:-http://localhost:9000/vod}
       - SESSION_TYPE=redis
       - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8087:8087"
     volumes:
@@ -236,9 +373,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      media-service:
-        condition: service_started
-
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8087 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.playback-service
   presence-service:
     build:
       context: .
@@ -254,11 +400,23 @@ services:
       - "8092:8092"
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       auth-service:
         condition: service_started
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8092 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.presence-service
 
   chat-service:
     build:
@@ -281,11 +439,23 @@ services:
       id-service:
         condition: service_started
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       auth-service:
         condition: service_started
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8088 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.chat-service
 
   chat-dispatcher:
     build:
@@ -301,11 +471,23 @@ services:
       - "8089:8089"
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       chat-service:
         condition: service_started
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8089 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.chat-dispatcher
 
   chat-history-service:
     build:
@@ -316,13 +498,26 @@ services:
       - CASSANDRA_HOSTS=${CASSANDRA_HOSTS:-cassandra:9042}
       - CASSANDRA_KEYSPACE=${CASSANDRA_KEYSPACE:-wes_chat}
       - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8091:8091"
     depends_on:
       cassandra:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8091 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.chat-history-service
 
   chat-persist-service:
     build:
@@ -339,9 +534,21 @@ services:
       - "8093:8093"
     depends_on:
       cassandra:
-        condition: service_started
+        condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8093 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.chat-persist-service
 
   id-service:
     build:
@@ -354,6 +561,19 @@ services:
     ports:
       - "8090:8090"
       - "50053:50053"
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50053 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.id-service
 
   nginx:
     image: nginx:alpine
@@ -362,9 +582,13 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./static:/usr/share/nginx/html:ro
-    restart: unless-stopped
     extra_hosts:
     - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   cassandra_data:
@@ -374,3 +598,4 @@ volumes:
   minio_data:
   kafka_data:
   kafka_secrets:
+  elasticsearch-data:
