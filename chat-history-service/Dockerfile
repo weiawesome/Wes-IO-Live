@@ -2,8 +2,9 @@ FROM golang:1.24.3-alpine AS builder
 
 WORKDIR /app
 
-# Copy workspace files (chat-history-service is standalone, no pkg/proto)
+# Copy workspace files
 COPY go.work go.work.sum* ./
+COPY pkg/ ./pkg/
 COPY chat-history-service/ ./chat-history-service/
 
 # Build (GOWORK=off: use go.mod only, not go.work)
