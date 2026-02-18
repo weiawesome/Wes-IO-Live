@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +9,7 @@ import (
 	"github.com/weiawesome/wes-io-live/id-service/internal/config"
 	"github.com/weiawesome/wes-io-live/id-service/internal/generator"
 	idgrpc "github.com/weiawesome/wes-io-live/id-service/internal/grpc"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/id"
 )
 
@@ -17,17 +17,24 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	log.Printf("Starting ID Service")
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		ServiceName: "id-service",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Msg("starting id-service")
 
 	// Initialize Snowflake generator
 	snowflake, err := generator.NewSnowflakeGenerator(cfg.Snowflake.MachineID, cfg.Snowflake.Epoch)
 	if err != nil {
-		log.Fatalf("Failed to create Snowflake generator: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create snowflake generator")
 	}
-	log.Printf("Snowflake generator initialized (machine_id=%d, epoch=%d)", cfg.Snowflake.MachineID, cfg.Snowflake.Epoch)
+	logger.Info().Int64("machine_id", cfg.Snowflake.MachineID).Int64("epoch", cfg.Snowflake.Epoch).Msg("snowflake generator initialized")
 
 	// Initialize UUID generator
 	uuidGen := generator.NewUUIDGenerator()
@@ -41,16 +48,16 @@ func main() {
 	// Initialize NanoID generator
 	nanoidGen, err := generator.NewNanoIDGenerator(cfg.NanoID.Size, cfg.NanoID.Alphabet)
 	if err != nil {
-		log.Fatalf("Failed to create NanoID generator: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create nanoid generator")
 	}
-	log.Printf("NanoID generator initialized (size=%d)", cfg.NanoID.Size)
+	logger.Info().Int("size", cfg.NanoID.Size).Msg("nanoid generator initialized")
 
 	// Initialize CUID2 generator
 	cuid2Gen, err := generator.NewCUID2Generator(cfg.CUID2.Length)
 	if err != nil {
-		log.Fatalf("Failed to create CUID2 generator: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create cuid2 generator")
 	}
-	log.Printf("CUID2 generator initialized (length=%d)", cfg.CUID2.Length)
+	logger.Info().Int("length", cfg.CUID2.Length).Msg("cuid2 generator initialized")
 
 	// Assemble generator map
 	generators := map[pb.IDType]generator.Generator{
@@ -64,9 +71,9 @@ func main() {
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
-	grpcServer, err := idgrpc.StartGRPCServer(grpcAddr, generators)
+	grpcServer, err := idgrpc.StartGRPCServer(grpcAddr, generators, logger)
 	if err != nil {
-		log.Fatalf("Failed to start gRPC server: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start grpc server")
 	}
 
 	// Wait for interrupt signal
@@ -74,7 +81,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down ID Service...")
+	logger.Info().Msg("shutting down id-service")
 	grpcServer.GracefulStop()
-	log.Println("ID Service stopped")
+	logger.Info().Msg("id-service stopped")
 }

@@ -3,10 +3,11 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 
+	"github.com/rs/zerolog"
 	"github.com/weiawesome/wes-io-live/id-service/internal/generator"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/id"
 	"google.golang.org/grpc"
 )
@@ -98,21 +99,23 @@ func (s *idServer) ParseID(ctx context.Context, req *pb.ParseIDRequest) (*pb.Par
 }
 
 // StartGRPCServer creates and starts the gRPC server in a background goroutine.
-func StartGRPCServer(addr string, generators map[pb.IDType]generator.Generator) (*grpc.Server, error) {
+func StartGRPCServer(addr string, generators map[pb.IDType]generator.Generator, logger zerolog.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	s := grpc.NewServer()
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(pkglog.UnaryServerInterceptor(logger)),
+	)
 	pb.RegisterIDServiceServer(s, &idServer{
 		generators: generators,
 	})
 
 	go func() {
-		log.Printf("ID gRPC server listening on %s", addr)
+		logger.Info().Str("addr", addr).Msg("grpc server listening")
 		if err := s.Serve(lis); err != nil {
-			log.Printf("gRPC server error: %v", err)
+			logger.Error().Err(err).Msg("grpc server error")
 		}
 	}()
 
