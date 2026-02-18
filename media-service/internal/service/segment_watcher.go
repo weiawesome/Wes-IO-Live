@@ -3,7 +3,6 @@ package service
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 // SegmentWatcherCallback is called when a new segment is detected.
@@ -84,7 +84,8 @@ func (w *SegmentWatcher) StartWatchingSession(roomID, sessionID string) error {
 	// Wait for directory to exist and start watching
 	go w.waitAndWatchSession(key, watcher, sessionDir)
 
-	log.Printf("Started watching for segments in room %s session %s", roomID, sessionID)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("started watching for segments")
 	return nil
 }
 
@@ -123,7 +124,8 @@ func (w *SegmentWatcher) StartWatching(roomID string) error {
 	// Wait for directory to exist
 	go w.waitAndWatchSession(key, watcher, roomDir)
 
-	log.Printf("Started watching for segments in room %s", roomID)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Msg("started watching for segments")
 	return nil
 }
 
@@ -139,7 +141,8 @@ func (w *SegmentWatcher) waitAndWatchSession(key watchKey, watcher *fsnotify.Wat
 
 	// Add directory to watcher
 	if err := watcher.Add(dir); err != nil {
-		log.Printf("Failed to watch directory %s: %v", dir, err)
+		l := pkglog.L()
+		l.Error().Err(err).Str("dir", dir).Msg("failed to watch directory")
 		return
 	}
 
@@ -166,7 +169,8 @@ func (w *SegmentWatcher) handleSessionEvents(key watchKey, watcher *fsnotify.Wat
 			if !ok {
 				return
 			}
-			log.Printf("Watcher error for room %s session %s: %v", key.RoomID, key.SessionID, err)
+			l := pkglog.L()
+			l.Error().Err(err).Str("room_id", key.RoomID).Str("session_id", key.SessionID).Msg("watcher error")
 		}
 	}
 }
@@ -277,8 +281,8 @@ func (w *SegmentWatcher) scanSessionPlaylist(key watchKey, dir string) {
 				go w.callback(key.RoomID, key.SessionID, seg)
 			}
 
-			log.Printf("New segment detected for room %s session %s: %s (duration: %.2fs)",
-				key.RoomID, key.SessionID, filename, currentDuration)
+			l := pkglog.L()
+		l.Info().Str("room_id", key.RoomID).Str("session_id", key.SessionID).Str("segment", filename).Float64("duration", currentDuration).Msg("new segment detected")
 		}
 	}
 }
@@ -318,7 +322,8 @@ func (w *SegmentWatcher) StopWatchingSession(roomID, sessionID string) {
 		watcher.Close()
 		delete(w.watchers, keyStr)
 		delete(w.known, keyStr)
-		log.Printf("Stopped watching segments for room %s session %s", roomID, sessionID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("stopped watching segments")
 	}
 }
 
@@ -355,5 +360,6 @@ func (w *SegmentWatcher) StopAll() {
 		delete(w.watchers, keyStr)
 		delete(w.known, keyStr)
 	}
-	log.Println("All segment watchers stopped")
+	l := pkglog.L()
+	l.Info().Msg("all segment watchers stopped")
 }
