@@ -9,6 +9,7 @@ import (
 	"github.com/weiawesome/wes-io-live/chat-history-service/internal/cache"
 	"github.com/weiawesome/wes-io-live/chat-history-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/chat-history-service/internal/repository"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -92,7 +93,8 @@ func (s *chatHistoryServiceImpl) fetchWithCache(
 
 	if !errors.Is(err, cache.ErrCacheMiss) {
 		// Log error but continue to fetch from DB
-		fmt.Printf("cache get error: %v\n", err)
+		l := log.Ctx(ctx)
+		l.Warn().Err(err).Msg("cache get error")
 	}
 
 	// Fetch from database
@@ -114,7 +116,8 @@ func (s *chatHistoryServiceImpl) fetchWithCache(
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := s.cache.Set(cacheCtx, cacheKey, result, s.cacheTTL); err != nil {
-			fmt.Printf("cache set error: %v\n", err)
+			l := log.L()
+			l.Warn().Err(err).Msg("cache set error")
 		}
 	}()
 
