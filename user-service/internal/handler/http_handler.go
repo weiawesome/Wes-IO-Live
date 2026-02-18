@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/middleware"
 	"github.com/weiawesome/wes-io-live/pkg/response"
 	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
@@ -54,13 +55,16 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 
 // Register handles user registration.
 func (h *Handler) Register(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	var req domain.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid register request")
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	result, err := h.userService.Register(c.Request.Context(), &req)
+	result, err := h.userService.Register(ctx, &req)
 	if err != nil {
 		if errors.Is(err, repository.ErrEmailExists) {
 			response.Conflict(c, "email already exists")
@@ -70,6 +74,7 @@ func (h *Handler) Register(c *gin.Context) {
 			response.Conflict(c, "username already exists")
 			return
 		}
+		l.Error().Err(err).Msg("register failed")
 		response.InternalError(c, "failed to register user")
 		return
 	}
@@ -79,18 +84,22 @@ func (h *Handler) Register(c *gin.Context) {
 
 // Login handles user login.
 func (h *Handler) Login(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	var req domain.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid login request")
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	result, err := h.userService.Login(c.Request.Context(), &req)
+	result, err := h.userService.Login(ctx, &req)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			response.Unauthorized(c, "invalid email or password")
 			return
 		}
+		l.Error().Err(err).Msg("login failed")
 		response.InternalError(c, "failed to login")
 		return
 	}
@@ -100,14 +109,18 @@ func (h *Handler) Login(c *gin.Context) {
 
 // RefreshToken handles token refresh.
 func (h *Handler) RefreshToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	var req domain.RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid refresh token request")
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	result, err := h.userService.RefreshToken(c.Request.Context(), &req)
+	result, err := h.userService.RefreshToken(ctx, &req)
 	if err != nil {
+		l.Warn().Err(err).Msg("refresh token failed")
 		response.Unauthorized(c, "invalid or expired refresh token")
 		return
 	}
@@ -117,13 +130,16 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 
 // Logout handles user logout.
 func (h *Handler) Logout(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	userID := middleware.GetUserID(c)
 	if userID == "" {
 		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
-	if err := h.userService.Logout(c.Request.Context(), userID); err != nil {
+	if err := h.userService.Logout(ctx, userID); err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("logout failed")
 		response.InternalError(c, "failed to logout")
 		return
 	}
@@ -133,18 +149,21 @@ func (h *Handler) Logout(c *gin.Context) {
 
 // GetMe returns current user info.
 func (h *Handler) GetMe(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	userID := middleware.GetUserID(c)
 	if userID == "" {
 		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
-	user, err := h.userService.GetUser(c.Request.Context(), userID)
+	user, err := h.userService.GetUser(ctx, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			response.NotFound(c, "user not found")
 			return
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("get user failed")
 		response.InternalError(c, "failed to get user")
 		return
 	}
@@ -154,6 +173,8 @@ func (h *Handler) GetMe(c *gin.Context) {
 
 // UpdateMe updates current user.
 func (h *Handler) UpdateMe(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	userID := middleware.GetUserID(c)
 	if userID == "" {
 		response.Unauthorized(c, "unauthorized")
@@ -162,16 +183,18 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 
 	var req domain.UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid update request")
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	user, err := h.userService.UpdateUser(c.Request.Context(), userID, &req)
+	user, err := h.userService.UpdateUser(ctx, userID, &req)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			response.NotFound(c, "user not found")
 			return
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("update user failed")
 		response.InternalError(c, "failed to update user")
 		return
 	}
@@ -181,6 +204,8 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 
 // ChangePassword changes current user's password.
 func (h *Handler) ChangePassword(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	userID := middleware.GetUserID(c)
 	if userID == "" {
 		response.Unauthorized(c, "unauthorized")
@@ -189,11 +214,12 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 
 	var req domain.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid change password request")
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	if err := h.userService.ChangePassword(c.Request.Context(), userID, &req); err != nil {
+	if err := h.userService.ChangePassword(ctx, userID, &req); err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			response.NotFound(c, "user not found")
 			return
@@ -202,6 +228,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 			response.BadRequest(c, "current password is incorrect")
 			return
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("change password failed")
 		response.InternalError(c, "failed to change password")
 		return
 	}
@@ -211,17 +238,20 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 
 // DeleteMe deletes current user.
 func (h *Handler) DeleteMe(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
 	userID := middleware.GetUserID(c)
 	if userID == "" {
 		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
-	if err := h.userService.DeleteUser(c.Request.Context(), userID); err != nil {
+	if err := h.userService.DeleteUser(ctx, userID); err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			response.NotFound(c, "user not found")
 			return
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("delete user failed")
 		response.InternalError(c, "failed to delete user")
 		return
 	}
