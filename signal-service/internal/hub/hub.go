@@ -2,11 +2,11 @@ package hub
 
 import (
 	"encoding/json"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/config"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/domain"
 )
@@ -61,13 +61,14 @@ func NewHub(cfg config.WebSocketConfig) *Hub {
 
 // Run starts the hub's main loop.
 func (h *Hub) Run() {
+	l := pkglog.L()
 	for {
 		select {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client.ID] = client
 			h.mu.Unlock()
-			log.Printf("Client registered: %s", client.ID)
+			l.Info().Str("client_id", client.ID).Msg("client registered")
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -83,7 +84,7 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("Client unregistered: %s", client.ID)
+			l.Info().Str("client_id", client.ID).Msg("client unregistered")
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
@@ -124,7 +125,8 @@ func (h *Hub) JoinRoom(client *Client, roomID string) {
 		h.rooms[roomID] = make(map[string]*Client)
 	}
 	h.rooms[roomID][client.ID] = client
-	log.Printf("Client %s joined room %s", client.ID, roomID)
+	l := pkglog.L()
+	l.Info().Str("client_id", client.ID).Str("room_id", roomID).Msg("client joined room")
 }
 
 // LeaveRoom removes a client from a room.
@@ -138,7 +140,8 @@ func (h *Hub) LeaveRoom(client *Client, roomID string) {
 			delete(h.rooms, roomID)
 		}
 	}
-	log.Printf("Client %s left room %s", client.ID, roomID)
+	l := pkglog.L()
+	l.Info().Str("client_id", client.ID).Str("room_id", roomID).Msg("client left room")
 }
 
 // BroadcastToRoom sends a message to all clients in a room.
@@ -221,7 +224,8 @@ func (c *Client) ReadPump(handler func(*Client, []byte)) {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+				l := pkglog.L()
+				l.Error().Err(err).Msg("websocket error")
 			}
 			break
 		}
