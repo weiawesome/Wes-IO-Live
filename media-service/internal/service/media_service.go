@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/weiawesome/wes-io-live/media-service/internal/domain"
 	peerManager "github.com/weiawesome/wes-io-live/media-service/internal/webrtc"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/pubsub"
 )
 
@@ -121,12 +121,13 @@ func (s *mediaService) HandleStartBroadcast(ctx context.Context, roomID, userID,
 		return err
 	}
 
+	l := pkglog.L()
 	channel := pubsub.MediaToSignalChannel(roomID)
 	if err := s.pubsub.Publish(ctx, channel, event); err != nil {
-		log.Printf("Failed to publish broadcast answer: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish broadcast answer")
 	}
 
-	log.Printf("Broadcast started for room %s, answer sent", roomID)
+	l.Info().Str("room_id", roomID).Msg("broadcast started, answer sent")
 	return nil
 }
 
@@ -161,7 +162,8 @@ func (s *mediaService) HandleICECandidate(ctx context.Context, roomID, candidate
 }
 
 func (s *mediaService) HandleStopBroadcast(ctx context.Context, roomID, reason string) error {
-	log.Printf("Stopping broadcast for room %s (reason: %s)", roomID, reason)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Str("reason", reason).Msg("stopping broadcast")
 	s.cleanupStream(roomID)
 
 	// Notify Signal Service
@@ -188,7 +190,8 @@ func (s *mediaService) Start(ctx context.Context) error {
 
 	go s.handleSignalEvents(ctx, eventCh)
 
-	log.Println("Media service started, subscribed to signal events")
+	l := pkglog.L()
+	l.Info().Msg("media service started, subscribed to signal events")
 	return nil
 }
 
@@ -227,35 +230,36 @@ func (s *mediaService) handleSignalEvents(ctx context.Context, eventCh <-chan *p
 }
 
 func (s *mediaService) processSignalEvent(ctx context.Context, event *pubsub.Event) {
+	l := pkglog.L()
 	switch event.Type {
 	case pubsub.EventStartBroadcast:
 		var payload pubsub.StartBroadcastPayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal start broadcast: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal start broadcast")
 			return
 		}
 		if err := s.HandleStartBroadcast(ctx, payload.RoomID, payload.UserID, payload.Offer); err != nil {
-			log.Printf("Failed to handle start broadcast: %v", err)
+			l.Error().Err(err).Str("room_id", payload.RoomID).Msg("failed to handle start broadcast")
 		}
 
 	case pubsub.EventICECandidate:
 		var payload pubsub.ICECandidatePayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal ICE candidate: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal ice candidate")
 			return
 		}
 		if err := s.HandleICECandidate(ctx, payload.RoomID, payload.Candidate); err != nil {
-			log.Printf("Failed to handle ICE candidate: %v", err)
+			l.Error().Err(err).Str("room_id", payload.RoomID).Msg("failed to handle ice candidate")
 		}
 
 	case pubsub.EventStopBroadcast:
 		var payload pubsub.StopBroadcastPayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal stop broadcast: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal stop broadcast")
 			return
 		}
 		if err := s.HandleStopBroadcast(ctx, payload.RoomID, payload.Reason); err != nil {
-			log.Printf("Failed to handle stop broadcast: %v", err)
+			l.Error().Err(err).Str("room_id", payload.RoomID).Msg("failed to handle stop broadcast")
 		}
 	}
 }
@@ -287,23 +291,24 @@ func (s *mediaService) handleTrack(roomID string, track *webrtc.TrackRemote) {
 }
 
 func (s *mediaService) startHLSTranscoding(roomID string, videoTrack, audioTrack *webrtc.TrackRemote) {
+	l := pkglog.L()
 	// Start VOD tracking if enabled - this determines the sessionID
 	var sessionID string
 	if s.vodManager != nil {
 		ctx := context.Background()
 		session, err := s.vodManager.StartRoom(ctx, roomID)
 		if err != nil {
-			log.Printf("Failed to start VOD tracking for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("failed to start vod tracking")
 		} else if session != nil {
 			sessionID = session.SessionID
-			log.Printf("VOD session started for room %s: %s", roomID, sessionID)
+			l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("vod session started")
 		}
 	}
 
 	// Start HLS immediately - don't delay, we don't want to miss keyframes
 	hlsUrl, err := s.transcoder.StartHLS(roomID, sessionID, videoTrack, audioTrack)
 	if err != nil {
-		log.Printf("Failed to start HLS for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to start hls")
 		return
 	}
 
@@ -331,15 +336,16 @@ func (s *mediaService) startHLSTranscoding(roomID string, videoTrack, audioTrack
 
 	channel := pubsub.MediaToSignalChannel(roomID)
 	if err := s.pubsub.Publish(ctx, channel, event); err != nil {
-		log.Printf("Failed to publish stream ready: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish stream ready")
 	}
 
-	log.Printf("HLS stream ready for room %s: %s", roomID, hlsUrl)
+	l.Info().Str("room_id", roomID).Str("hls_url", hlsUrl).Msg("hls stream ready")
 }
 
 func (s *mediaService) handleConnectionState(roomID string, state webrtc.PeerConnectionState) {
 	if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-		log.Printf("Connection %s for room %s", state.String(), roomID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("state", state.String()).Msg("connection state changed")
 		ctx := context.Background()
 		s.HandleStopBroadcast(ctx, roomID, "connection_"+state.String())
 	}
@@ -395,11 +401,12 @@ func (s *mediaService) cleanupStreamLocked(roomID string) {
 	// Finalize VOD if enabled
 	if s.vodManager != nil && s.vodManager.IsRoomTracking(roomID) {
 		go func() {
+			l := pkglog.L()
 			vodURL, err := s.vodManager.FinalizeRoom(ctx, roomID)
 			if err != nil {
-				log.Printf("Failed to finalize VOD for room %s: %v", roomID, err)
+				l.Error().Err(err).Str("room_id", roomID).Msg("failed to finalize vod")
 			} else if vodURL != "" {
-				log.Printf("VOD available for room %s: %s", roomID, vodURL)
+				l.Info().Str("room_id", roomID).Str("vod_url", vodURL).Msg("vod available")
 			}
 		}()
 	}
@@ -410,7 +417,8 @@ func (s *mediaService) cleanupStreamLocked(roomID string) {
 	}
 
 	delete(s.streams, roomID)
-	log.Printf("Stream cleaned up for room %s", roomID)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Msg("stream cleaned up")
 }
 
 // GetVODURL returns the VOD URL for the latest session of a room.
