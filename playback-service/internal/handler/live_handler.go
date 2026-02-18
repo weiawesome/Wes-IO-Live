@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/weiawesome/wes-io-live/playback-service/internal/service"
 )
 
@@ -22,15 +24,18 @@ func NewLiveHandler(playbackSvc *service.PlaybackService) *LiveHandler {
 }
 
 // RegisterRoutes registers the live playback routes.
-func (h *LiveHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/live/", h.handleLive)
+func (h *LiveHandler) RegisterRoutes(r *gin.Engine) {
+	r.Any("/live/*path", h.handleLive)
 }
 
 // handleLive handles live stream requests.
 // Supports:
 // - GET /live/{roomID}/stream.m3u8 - Live stream (auto-detect sessionID from session store)
 // - GET /live/{roomID}/{sessionID}/{file} - Live stream with explicit sessionID
-func (h *LiveHandler) handleLive(w http.ResponseWriter, r *http.Request) {
+func (h *LiveHandler) handleLive(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
+
 	// Set CORS headers
 	setCORSHeaders(w)
 
@@ -45,8 +50,8 @@ func (h *LiveHandler) handleLive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse path: /live/{roomID}/... or /live/{roomID}/{sessionID}/...
-	path := strings.TrimPrefix(r.URL.Path, "/live/")
-	if path == "" || path == r.URL.Path {
+	path := strings.TrimPrefix(c.Param("path"), "/")
+	if path == "" {
 		http.Error(w, "Room ID required", http.StatusBadRequest)
 		return
 	}

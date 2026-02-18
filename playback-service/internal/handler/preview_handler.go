@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/weiawesome/wes-io-live/playback-service/internal/service"
 )
 
@@ -22,15 +24,18 @@ func NewPreviewHandler(playbackSvc *service.PlaybackService) *PreviewHandler {
 }
 
 // RegisterRoutes registers the preview routes.
-func (h *PreviewHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/preview/", h.handlePreview)
+func (h *PreviewHandler) RegisterRoutes(r *gin.Engine) {
+	r.Any("/preview/*path", h.handlePreview)
 }
 
 // handlePreview handles preview requests.
 // Supports:
 // - GET /preview/{roomID}/latest/thumbnail.jpg - Get latest session thumbnail
 // - GET /preview/{roomID}/{sessionID}/thumbnail.jpg - Get specific session thumbnail
-func (h *PreviewHandler) handlePreview(w http.ResponseWriter, r *http.Request) {
+func (h *PreviewHandler) handlePreview(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
+
 	// Set CORS headers
 	setCORSHeaders(w)
 
@@ -45,8 +50,8 @@ func (h *PreviewHandler) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse path: /preview/{roomID}/...
-	path := strings.TrimPrefix(r.URL.Path, "/preview/")
-	if path == "" || path == r.URL.Path {
+	path := strings.TrimPrefix(c.Param("path"), "/")
+	if path == "" {
 		http.Error(w, "Room ID required", http.StatusBadRequest)
 		return
 	}

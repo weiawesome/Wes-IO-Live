@@ -1,8 +1,9 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // HealthHandler handles health check requests.
@@ -18,16 +19,14 @@ func NewHealthHandler(version string) *HealthHandler {
 }
 
 // RegisterRoutes registers the health check routes.
-func (h *HealthHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/health", h.handleHealth)
-	mux.HandleFunc("/healthz", h.handleHealth)
+func (h *HealthHandler) RegisterRoutes(r *gin.Engine) {
+	r.Any("/health", h.handleHealth)
+	r.Any("/healthz", h.handleHealth)
 }
 
 // handleHealth returns the service health status.
-func (h *HealthHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+func (h *HealthHandler) handleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"service": "playback-service",
 		"version": h.version,
