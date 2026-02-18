@@ -2,15 +2,14 @@ package delivery
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/config"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/chat"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-
-	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/config"
 )
 
 type connEntry struct {
@@ -126,7 +125,8 @@ func (p *GRPCPool) evictLoop() {
 				idle := now.Sub(entry.lastUsed) > p.idleTimeout
 				entry.mu.Unlock()
 				if idle {
-					log.Printf("Evicting idle gRPC connection to %s", addr)
+					l := log.L()
+					l.Info().Str("addr", addr).Msg("evicting idle grpc connection")
 					p.removeConn(addr)
 				}
 				return true
@@ -145,7 +145,8 @@ func (p *GRPCPool) Close() error {
 		entry := value.(*connEntry)
 		entry.conn.Close()
 		p.conns.Delete(addr)
-		log.Printf("Closed gRPC connection to %s", addr)
+		l := log.L()
+		l.Debug().Str("addr", addr).Msg("closed grpc connection")
 		return true
 	})
 

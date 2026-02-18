@@ -3,11 +3,11 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/config"
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/dispatcher"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type Consumer struct {
@@ -47,12 +47,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", c.topic, err)
 	}
 
-	log.Printf("Kafka consumer started (topic: %s, group: %s)", c.topic, c.groupID)
+	l := log.L()
+	l.Info().Str("topic", c.topic).Str("group", c.groupID).Msg("kafka consumer started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Kafka consumer stopping...")
+			l.Info().Msg("kafka consumer stopping")
 			return nil
 		default:
 		}
@@ -65,11 +66,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 		switch e := ev.(type) {
 		case *kafka.Message:
 			if err := c.dispatcher.HandleMessage(ctx, e.Key, e.Value); err != nil {
-				log.Printf("HandleMessage error (partition=%d offset=%v): %v",
-					e.TopicPartition.Partition, e.TopicPartition.Offset, err)
+				cl := log.Ctx(ctx)
+				cl.Error().
+					Int32("partition", e.TopicPartition.Partition).
+					Str("offset", e.TopicPartition.Offset.String()).
+					Err(err).
+					Msg("handle message error")
 			}
 		case kafka.Error:
-			log.Printf("Kafka error: %v (code=%d fatal=%v)", e, e.Code(), e.IsFatal())
+			l.Error().Int("code", int(e.Code())).Bool("fatal", e.IsFatal()).Err(e).Msg("kafka error")
 			if e.IsFatal() {
 				return fmt.Errorf("fatal kafka error: %w", e)
 			}
@@ -82,6 +87,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 func (c *Consumer) Close() error {
-	log.Println("Closing Kafka consumer...")
+	l := log.L()
+	l.Info().Msg("closing kafka consumer")
 	return c.consumer.Close()
 }
