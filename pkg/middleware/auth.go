@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -57,11 +56,9 @@ func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(authHeader, BearerPrefix)
-		fmt.Println("ValidateToken token: ", token)
 		resp, err := m.authClient.ValidateToken(context.Background(), &pb.ValidateTokenRequest{
 			AccessToken: token,
 		})
-		fmt.Println("ValidateToken response: ", resp)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "failed to validate token",
