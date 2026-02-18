@@ -2,11 +2,11 @@ package webrtc
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/webrtc/v4"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 // PeerManager manages WebRTC peer connections for rooms.
@@ -116,21 +116,24 @@ func (pm *PeerManager) CreatePeerConnection(
 
 	// Set up handlers
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		log.Printf("Track received: %s (type: %s)", track.Codec().MimeType, track.Kind().String())
+		l := pkglog.L()
+		l.Info().Str("codec", track.Codec().MimeType).Str("kind", track.Kind().String()).Msg("track received")
 		if onTrack != nil {
 			onTrack(track, receiver)
 		}
 	})
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Printf("Connection State: %s", state.String())
+		l := pkglog.L()
+		l.Info().Str("state", state.String()).Msg("connection state changed")
 		if onState != nil {
 			onState(state)
 		}
 	})
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("ICE Connection State: %s", state.String())
+		l := pkglog.L()
+		l.Info().Str("state", state.String()).Msg("ice connection state changed")
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
