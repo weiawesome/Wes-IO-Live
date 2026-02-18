@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,47 +17,57 @@ import (
 	"github.com/weiawesome/wes-io-live/chat-service/internal/kafka"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/registry"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/service"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	log.Printf("Starting Chat Service on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "chat-service",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("starting chat service")
 
 	// Initialize Redis registry
 	reg, err := registry.NewRedisRegistry(cfg.Redis, cfg.GRPC.AdvertiseAddress)
 	if err != nil {
-		log.Fatalf("Failed to initialize Redis registry: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize redis registry")
 	}
 	defer reg.Close()
-	log.Printf("Connected to Redis at %s", cfg.Redis.Address)
+	logger.Info().Str("address", cfg.Redis.Address).Msg("connected to redis")
 
 	// Initialize Kafka producer
 	producer, err := kafka.NewConfluentProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.Partitions)
 	if err != nil {
-		log.Fatalf("Failed to initialize Kafka producer: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize kafka producer")
 	}
-	log.Printf("Connected to Kafka at %s (topic: %s)", cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	logger.Info().Str("brokers", cfg.Kafka.Brokers).Str("topic", cfg.Kafka.Topic).Msg("connected to kafka")
 
 	// Initialize Auth client
 	authClient, err := client.NewAuthClient(cfg.Auth.GRPCAddress)
 	if err != nil {
-		log.Fatalf("Failed to create auth client: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create auth client")
 	}
 	defer authClient.Close()
-	log.Printf("Connected to Auth Service at %s", cfg.Auth.GRPCAddress)
+	logger.Info().Str("address", cfg.Auth.GRPCAddress).Msg("connected to auth service")
 
 	// Initialize ID client
 	idClient, err := client.NewIDClient(cfg.IDService.GRPCAddress)
 	if err != nil {
-		log.Fatalf("Failed to create ID client: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create id client")
 	}
 	defer idClient.Close()
-	log.Printf("Connected to ID Service at %s", cfg.IDService.GRPCAddress)
+	logger.Info().Str("address", cfg.IDService.GRPCAddress).Msg("connected to id service")
 
 	// Initialize Hub
 	wsHub := hub.NewHub(cfg.WebSocket)
@@ -72,15 +81,15 @@ func main() {
 	defer cancel()
 
 	if err := chatSvc.Start(ctx); err != nil {
-		log.Fatalf("Failed to start chat service: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start chat service")
 	}
 	defer chatSvc.Stop()
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
-	grpcServer, err := chatgrpc.StartGRPCServer(grpcAddr, wsHub)
+	grpcServer, err := chatgrpc.StartGRPCServer(grpcAddr, wsHub, logger)
 	if err != nil {
-		log.Fatalf("Failed to start gRPC server: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start grpc server")
 	}
 	defer grpcServer.GracefulStop()
 
@@ -98,7 +107,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      pkglog.HTTPMiddleware(logger)(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -106,9 +115,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Chat Service listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("chat service listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logger.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
@@ -117,15 +126,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down Chat Service...")
+	logger.Info().Msg("shutting down chat service")
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error().Err(err).Msg("server forced to shutdown")
 	}
 
-	log.Println("Chat Service stopped")
+	logger.Info().Msg("chat service stopped")
 }
