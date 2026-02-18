@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"time"
 
-	pb "github.com/weiawesome/wes-io-live/proto/chat"
+	"github.com/rs/zerolog"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/hub"
+	"github.com/weiawesome/wes-io-live/pkg/log"
+	pb "github.com/weiawesome/wes-io-live/proto/chat"
 	"google.golang.org/grpc"
 )
 
@@ -50,7 +51,8 @@ func (s *chatDeliveryServer) DeliverMessage(ctx context.Context, req *pb.Deliver
 	count := s.hub.GetRoomSessionClientCount(req.GetRoomId(), req.GetSessionId())
 	s.hub.BroadcastRawToRoomSession(req.GetRoomId(), req.GetSessionId(), data, "")
 
-	log.Printf("Delivered chat message to room-session %s:%s (%d clients)", req.GetRoomId(), req.GetSessionId(), count)
+	l := log.Ctx(ctx)
+	l.Info().Str("room_id", req.GetRoomId()).Str("session_id", req.GetSessionId()).Int("clients", count).Msg("delivered chat message")
 
 	return &pb.DeliverMessageResponse{
 		Success:        true,
@@ -79,7 +81,8 @@ func (s *chatDeliveryServer) DeliverSystemMessage(ctx context.Context, req *pb.D
 	count := s.hub.GetRoomSessionClientCount(req.GetRoomId(), req.GetSessionId())
 	s.hub.BroadcastRawToRoomSession(req.GetRoomId(), req.GetSessionId(), data, "")
 
-	log.Printf("Delivered system message to room-session %s:%s (%d clients)", req.GetRoomId(), req.GetSessionId(), count)
+	l := log.Ctx(ctx)
+	l.Info().Str("room_id", req.GetRoomId()).Str("session_id", req.GetSessionId()).Int("clients", count).Msg("delivered system message")
 
 	return &pb.DeliverSystemMessageResponse{
 		Success:        true,
@@ -87,19 +90,23 @@ func (s *chatDeliveryServer) DeliverSystemMessage(ctx context.Context, req *pb.D
 	}, nil
 }
 
-func StartGRPCServer(addr string, h *hub.Hub) (*grpc.Server, error) {
+func StartGRPCServer(addr string, h *hub.Hub, logger zerolog.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	s := grpc.NewServer()
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(log.UnaryServerInterceptor(logger)),
+		grpc.StreamInterceptor(log.StreamServerInterceptor(logger)),
+	)
 	pb.RegisterChatDeliveryServiceServer(s, &chatDeliveryServer{hub: h})
 
 	go func() {
-		log.Printf("Chat gRPC server listening on %s", addr)
+		l := log.L()
+		l.Info().Str("address", addr).Msg("chat grpc server listening")
 		if err := s.Serve(lis); err != nil {
-			log.Printf("gRPC server error: %v", err)
+			l.Error().Err(err).Msg("grpc server error")
 		}
 	}()
 
