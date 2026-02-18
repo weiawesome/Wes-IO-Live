@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/hub"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/service"
@@ -39,7 +39,8 @@ func NewWSHandler(h *hub.Hub, svc service.PresenceService) *WSHandler {
 func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		l := pkglog.L()
+		l.Error().Err(err).Msg("websocket upgrade failed")
 		return
 	}
 
@@ -61,12 +62,13 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WSHandler) handleMessage(c *hub.Client, message []byte) {
+	l := pkglog.L()
 	ctx := context.Background()
 
 	// Parse base message to determine type
 	var base domain.BaseMessage
 	if err := json.Unmarshal(message, &base); err != nil {
-		log.Printf("Failed to parse message: %v", err)
+		l.Warn().Err(err).Msg("failed to parse message")
 		c.SendMessage(domain.NewErrorMessage("invalid message format"))
 		return
 	}
@@ -83,7 +85,7 @@ func (h *WSHandler) handleMessage(c *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleJoin(ctx, c, msg.RoomID, msg.Token, msg.DeviceHash); err != nil {
-			log.Printf("HandleJoin error: %v", err)
+			l.Error().Err(err).Msg("HandleJoin error")
 		}
 
 	case domain.MsgTypeLeave:
@@ -97,12 +99,12 @@ func (h *WSHandler) handleMessage(c *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleLeave(ctx, c, msg.RoomID); err != nil {
-			log.Printf("HandleLeave error: %v", err)
+			l.Error().Err(err).Msg("HandleLeave error")
 		}
 
 	case domain.MsgTypePing:
 		if err := h.service.HandleHeartbeat(ctx, c); err != nil {
-			log.Printf("HandleHeartbeat error: %v", err)
+			l.Error().Err(err).Msg("HandleHeartbeat error")
 		}
 
 	default:
@@ -114,6 +116,7 @@ func (h *WSHandler) handleMessage(c *hub.Client, message []byte) {
 func (h *WSHandler) OnDisconnect(c *hub.Client) {
 	ctx := context.Background()
 	if err := h.service.HandleDisconnect(ctx, c); err != nil {
-		log.Printf("HandleDisconnect error: %v", err)
+		l := pkglog.L()
+		l.Error().Err(err).Msg("HandleDisconnect error")
 	}
 }
