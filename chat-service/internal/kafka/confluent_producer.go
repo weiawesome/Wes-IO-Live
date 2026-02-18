@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/domain"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type ConfluentProducer struct {
@@ -20,7 +20,8 @@ type ConfluentProducer struct {
 func NewConfluentProducer(brokers, topic string, partitions int) (*ConfluentProducer, error) {
 	// Ensure topic exists with desired partition count
 	if err := ensureTopic(brokers, topic, partitions); err != nil {
-		log.Printf("Warning: failed to ensure topic %s: %v (may already exist)", topic, err)
+		l := log.L()
+		l.Warn().Str("topic", topic).Err(err).Msg("failed to ensure topic (may already exist)")
 	}
 
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
@@ -81,7 +82,8 @@ func (cp *ConfluentProducer) deliveryReportHandler() {
 		switch ev := e.(type) {
 		case *kafka.Message:
 			if ev.TopicPartition.Error != nil {
-				log.Printf("Kafka delivery failed: %v", ev.TopicPartition.Error)
+				l := log.L()
+				l.Error().Err(ev.TopicPartition.Error).Msg("kafka delivery failed")
 			}
 		}
 	}
