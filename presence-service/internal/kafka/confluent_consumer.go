@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 // ConfluentConsumer implements BroadcastEventConsumer using confluent-kafka-go.
@@ -44,7 +44,8 @@ func (cc *ConfluentConsumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", cc.topic, err)
 	}
 
-	log.Printf("Kafka consumer started, subscribed to topic: %s", cc.topic)
+	l := pkglog.L()
+	l.Info().Str("topic", cc.topic).Msg("kafka consumer started")
 
 	go cc.consumeLoop(ctx)
 
@@ -52,12 +53,13 @@ func (cc *ConfluentConsumer) Start(ctx context.Context) error {
 }
 
 func (cc *ConfluentConsumer) consumeLoop(ctx context.Context) {
+	l := pkglog.L()
 	defer close(cc.doneCh)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Kafka consumer shutting down...")
+			l.Info().Msg("kafka consumer shutting down")
 			return
 		default:
 			msg, err := cc.consumer.ReadMessage(100 * time.Millisecond)
@@ -66,7 +68,7 @@ func (cc *ConfluentConsumer) consumeLoop(ctx context.Context) {
 				if err.(kafka.Error).Code() == kafka.ErrTimedOut {
 					continue
 				}
-				log.Printf("Kafka consumer error: %v", err)
+				l.Error().Err(err).Msg("kafka consumer error")
 				continue
 			}
 
@@ -76,17 +78,23 @@ func (cc *ConfluentConsumer) consumeLoop(ctx context.Context) {
 }
 
 func (cc *ConfluentConsumer) processMessage(ctx context.Context, msg *kafka.Message) {
+	l := pkglog.L()
+
 	var event BroadcastEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
-		log.Printf("Failed to unmarshal broadcast event: %v", err)
+		l.Error().Err(err).Msg("failed to unmarshal broadcast event")
 		return
 	}
 
-	log.Printf("Received broadcast event: type=%s room=%s broadcaster=%s reason=%s",
-		event.Type, event.RoomID, event.BroadcasterID, event.Reason)
+	l.Info().
+		Str("event_type", string(event.Type)).
+		Str("room_id", event.RoomID).
+		Str("broadcaster_id", event.BroadcasterID).
+		Str("reason", string(event.Reason)).
+		Msg("received broadcast event")
 
 	if err := cc.handler.HandleBroadcastEvent(ctx, &event); err != nil {
-		log.Printf("Failed to handle broadcast event: %v", err)
+		l.Error().Err(err).Str("event_type", string(event.Type)).Msg("failed to handle broadcast event")
 	}
 }
 
