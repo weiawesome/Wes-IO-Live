@@ -32,6 +32,7 @@
 | **Microservice Architecture** | Auth / User / Room / Signal / Media / Chat are separated for scalability |
 | **Real-time Chat**    | WebSocket chat + Kafka + Cassandra message persistence |
 | **STUN/TURN**         | ICE service for NAT traversal/relay, handles complex network scenarios |
+| **Monitoring**        | Elasticsearch, Fluentd, Kibana |
 
 ---
 
@@ -92,6 +93,34 @@ docker-compose up -d
 
 - **Home:** http://localhost:8080  
 - Register / Sign in → Create Room → Start Streaming
+
+---
+
+## 🔍 Monitoring
+
+### Unified Logging Structure [/pkg/log](./pkg/log)
+```json
+{
+  "level":"info",
+  "service":"xxx-service",
+  "time":"YYYY-MM-DDTHH:MM:SSZ",
+  // other custom fields based on specific microservice needs
+}
+```
+Easily parsed by Fluentd and stored in Elasticsearch for monitoring.
+
+### Kibana Dashboard Examples
+
+1. Log Data
+   ![Log Data](./assets/06-00-kibana.png)
+2. Service Log Count
+   ![Service Log Count](./assets/06-01-service-events.png)
+3. Service Action Count (Audit Events)
+   ![Service Action Count](./assets/06-02-service-actions.png)
+4. Dashboard Example
+   ![Dashboard Example](./assets/06-03-dashboard.png)
+
+Above are just simple examples, you can adjust them according to your needs.
 
 ---
 
