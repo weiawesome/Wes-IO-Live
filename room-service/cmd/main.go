@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/weiawesome/wes-io-live/pkg/database"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/middleware"
 	"github.com/weiawesome/wes-io-live/room-service/internal/config"
 	"github.com/weiawesome/wes-io-live/room-service/internal/domain"
@@ -19,8 +19,17 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
+
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "room-service",
+	})
+	logger := pkglog.L()
 
 	// Connect to database using GORM
 	dbConfig := &database.Config{
@@ -39,14 +48,14 @@ func main() {
 
 	db, err := database.New(dbConfig)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Fatal().Err(err).Msg("failed to connect to database")
 	}
 
 	// Auto-migrate
 	if err := database.AutoMigrate(db, &domain.RoomModel{}); err != nil {
-		log.Fatalf("Failed to auto-migrate: %v", err)
+		logger.Fatal().Err(err).Msg("failed to auto-migrate")
 	}
-	log.Println("Database migration completed")
+	logger.Info().Msg("database migration completed")
 
 	// Initialize repository
 	roomRepo := repository.NewGormRoomRepository(db)
@@ -57,14 +66,16 @@ func main() {
 	// Initialize auth middleware
 	authMiddleware, err := middleware.NewAuthMiddleware(cfg.AuthService.GRPCAddress)
 	if err != nil {
-		log.Fatalf("Failed to create auth middleware: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create auth middleware")
 	}
 
 	// Initialize HTTP handler
 	httpHandler := handler.NewHandler(roomService, authMiddleware)
 
 	// Setup Gin router
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(pkglog.GinMiddleware(logger))
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -76,8 +87,8 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Room Service starting on %s (driver: %s, max rooms per user: %d)", addr, cfg.Database.Driver, cfg.Room.MaxRoomsPerUser)
+	logger.Info().Str("addr", addr).Str("driver", cfg.Database.Driver).Int("max_rooms_per_user", cfg.Room.MaxRoomsPerUser).Msg("room-service starting")
 	if err := r.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start server")
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,25 +12,36 @@ import (
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/cassandra"
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/config"
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/consumer"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	log.Printf("Starting Chat Persist Service")
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "chat-persist-service",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Msg("starting chat persist service")
 
 	// Initialize Cassandra client
 	cassandraClient, err := cassandra.NewClient(cfg.Cassandra)
 	if err != nil {
-		log.Fatalf("Failed to connect to Cassandra: %v", err)
+		logger.Fatal().Err(err).Msg("failed to connect to cassandra")
 	}
 	defer cassandraClient.Close()
-	log.Printf("Connected to Cassandra (keyspace=%s, hosts=%v)",
-		cfg.Cassandra.Keyspace, cfg.Cassandra.Hosts)
+	logger.Info().
+		Str("keyspace", cfg.Cassandra.Keyspace).
+		Strs("hosts", cfg.Cassandra.Hosts).
+		Msg("connected to cassandra")
 
 	// Initialize message repository
 	repo := cassandra.NewMessageRepository(cassandraClient)
@@ -39,10 +49,13 @@ func main() {
 	// Initialize Kafka consumer
 	cons, err := consumer.NewConsumer(cfg.Kafka, repo)
 	if err != nil {
-		log.Fatalf("Failed to create Kafka consumer: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create kafka consumer")
 	}
-	log.Printf("Kafka consumer created (brokers=%s, topic=%s, group=%s)",
-		cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID)
+	logger.Info().
+		Str("brokers", cfg.Kafka.Brokers).
+		Str("topic", cfg.Kafka.Topic).
+		Str("group", cfg.Kafka.GroupID).
+		Msg("kafka consumer created")
 
 	// Start health HTTP server
 	mux := http.NewServeMux()
@@ -57,16 +70,19 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      pkglog.HTTPMiddleware(logger)(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
 
 	go func() {
-		log.Printf("Health server listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().
+			Str("host", cfg.Server.Host).
+			Int("port", cfg.Server.Port).
+			Msg("health server listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Health server error: %v", err)
+			logger.Fatal().Err(err).Msg("health server error")
 		}
 	}()
 
@@ -84,29 +100,29 @@ func main() {
 
 	select {
 	case <-quit:
-		log.Println("Received shutdown signal")
+		logger.Info().Msg("received shutdown signal")
 	case err := <-consumerDone:
 		if err != nil {
-			log.Printf("Consumer exited with error: %v", err)
+			logger.Error().Err(err).Msg("consumer exited with error")
 		}
 	}
 
 	// Graceful shutdown
-	log.Println("Shutting down Chat Persist Service...")
+	logger.Info().Msg("shutting down chat persist service")
 	cancel()
 
 	// Wait for consumer to stop
 	select {
 	case <-consumerDone:
 	case <-time.After(10 * time.Second):
-		log.Println("Consumer shutdown timed out")
+		logger.Warn().Msg("consumer shutdown timed out")
 	}
 
 	cons.Close()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	server.Shutdown(shutdownCtx)
+	_ = server.Shutdown(shutdownCtx)
 
-	log.Println("Chat Persist Service stopped")
+	logger.Info().Msg("chat persist service stopped")
 }

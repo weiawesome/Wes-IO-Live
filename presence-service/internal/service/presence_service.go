@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/client"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/hub"
@@ -49,6 +49,8 @@ func NewPresenceService(
 }
 
 func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID, token, deviceHash string) error {
+	l := pkglog.L()
+
 	// Determine user identity
 	var identity *domain.UserIdentity
 
@@ -56,7 +58,7 @@ func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID,
 		// Validate token for authenticated user
 		result, err := s.authClient.ValidateToken(ctx, token)
 		if err != nil {
-			log.Printf("Token validation failed: %v", err)
+			l.Warn().Err(err).Msg("token validation failed")
 			return c.SendMessage(domain.NewErrorMessage("authentication service unavailable"))
 		}
 
@@ -81,7 +83,7 @@ func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID,
 	// Leave current room if any
 	if c.RoomID != "" && c.RoomID != roomID {
 		if err := s.HandleLeave(ctx, c, c.RoomID); err != nil {
-			log.Printf("Error leaving previous room: %v", err)
+			l.Error().Err(err).Str("room_id", c.RoomID).Msg("error leaving previous room")
 		}
 	}
 
@@ -94,7 +96,7 @@ func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID,
 		err = s.store.AddDevice(ctx, roomID, identity.DeviceHash, ttl)
 	}
 	if err != nil {
-		log.Printf("Failed to add presence to store: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to add presence to store")
 		return c.SendMessage(domain.NewErrorMessage("failed to join room"))
 	}
 
@@ -105,7 +107,7 @@ func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID,
 	// Get current count
 	count, err := s.store.GetCount(ctx, roomID)
 	if err != nil {
-		log.Printf("Failed to get room count: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to get room count")
 		count = domain.PresenceCount{}
 	}
 
@@ -115,18 +117,20 @@ func (s *presenceService) HandleJoin(ctx context.Context, c *hub.Client, roomID,
 		RoomID: roomID,
 		Count:  count,
 	}); err != nil {
-		log.Printf("Failed to send joined message: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to send joined message")
 	}
 
 	// Publish to Redis Pub/Sub so all instances (including self) broadcast count
 	if err := s.store.PublishRoomUpdate(ctx, roomID, count); err != nil {
-		log.Printf("Failed to publish room update: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish room update")
 	}
 
 	return nil
 }
 
 func (s *presenceService) HandleLeave(ctx context.Context, c *hub.Client, roomID string) error {
+	l := pkglog.L()
+
 	if c.Identity == nil || c.RoomID != roomID {
 		return nil
 	}
@@ -139,7 +143,7 @@ func (s *presenceService) HandleLeave(ctx context.Context, c *hub.Client, roomID
 		err = s.store.RemoveDevice(ctx, roomID, c.Identity.DeviceHash)
 	}
 	if err != nil {
-		log.Printf("Failed to remove presence from store: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to remove presence from store")
 	}
 
 	// Update client state
@@ -148,11 +152,11 @@ func (s *presenceService) HandleLeave(ctx context.Context, c *hub.Client, roomID
 	// Publish count update to Redis Pub/Sub
 	count, err := s.store.GetCount(ctx, roomID)
 	if err != nil {
-		log.Printf("Failed to get room count after leave: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to get room count after leave")
 		count = domain.PresenceCount{}
 	}
 	if err := s.store.PublishRoomUpdate(ctx, roomID, count); err != nil {
-		log.Printf("Failed to publish room update: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish room update")
 	}
 
 	return nil
@@ -166,7 +170,8 @@ func (s *presenceService) HandleHeartbeat(ctx context.Context, c *hub.Client) er
 
 	// Refresh TTL in Redis
 	if err := s.store.RefreshTTL(ctx, c.Identity, c.RoomID, s.config.HeartbeatTimeout); err != nil {
-		log.Printf("Failed to refresh TTL: %v", err)
+		l := pkglog.L()
+		l.Error().Err(err).Str("room_id", c.RoomID).Msg("failed to refresh TTL")
 	}
 
 	c.LastPing = time.Now()
@@ -208,41 +213,47 @@ func (s *presenceService) GetAllLiveRooms(ctx context.Context) ([]string, error)
 }
 
 func (s *presenceService) HandleBroadcastEvent(ctx context.Context, event *kafka.BroadcastEvent) error {
+	l := pkglog.L()
+
 	switch event.Type {
 	case kafka.EventBroadcastStarted:
 		return s.handleBroadcastStarted(ctx, event)
 	case kafka.EventBroadcastStopped:
 		return s.handleBroadcastStopped(ctx, event)
 	default:
-		log.Printf("Unknown broadcast event type: %s", event.Type)
+		l.Warn().Str("event_type", string(event.Type)).Msg("unknown broadcast event type")
 		return nil
 	}
 }
 
 func (s *presenceService) handleBroadcastStarted(ctx context.Context, event *kafka.BroadcastEvent) error {
+	l := pkglog.L()
+
 	// Cancel any pending grace period timer for this room
 	s.cancelGracePeriod(event.RoomID)
 
 	// Mark room as live
 	if err := s.store.SetRoomLive(ctx, event.RoomID, event.BroadcasterID); err != nil {
-		log.Printf("Failed to set room %s as live: %v", event.RoomID, err)
+		l.Error().Err(err).Str("room_id", event.RoomID).Msg("failed to set room as live")
 		return err
 	}
 
 	// Publish live status update for multi-instance sync
 	if err := s.store.PublishLiveStatusUpdate(ctx, event.RoomID, true); err != nil {
-		log.Printf("Failed to publish live status update: %v", err)
+		l.Error().Err(err).Str("room_id", event.RoomID).Msg("failed to publish live status update")
 	}
 
-	log.Printf("Room %s is now live (broadcaster: %s)", event.RoomID, event.BroadcasterID)
+	l.Info().Str("room_id", event.RoomID).Str("broadcaster_id", event.BroadcasterID).Msg("room is now live")
 	return nil
 }
 
 func (s *presenceService) handleBroadcastStopped(ctx context.Context, event *kafka.BroadcastEvent) error {
+	l := pkglog.L()
+
 	if event.Reason == kafka.ReasonDisconnect {
 		// Start grace period for disconnect events
 		s.startGracePeriod(event.RoomID)
-		log.Printf("Started %v grace period for room %s (disconnect)", s.config.GracePeriod, event.RoomID)
+		l.Info().Str("room_id", event.RoomID).Dur("grace_period", s.config.GracePeriod).Msg("started grace period for disconnect")
 		return nil
 	}
 
@@ -266,9 +277,10 @@ func (s *presenceService) startGracePeriod(roomID string) {
 		delete(s.gracePeriodTimers, roomID)
 		s.timersMu.Unlock()
 
-		log.Printf("Grace period expired for room %s, marking offline", roomID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Msg("grace period expired, marking offline")
 		if err := s.setRoomOffline(ctx, roomID); err != nil {
-			log.Printf("Failed to set room %s offline after grace period: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("failed to set room offline after grace period")
 		}
 	})
 }
@@ -280,21 +292,24 @@ func (s *presenceService) cancelGracePeriod(roomID string) {
 	if timer, exists := s.gracePeriodTimers[roomID]; exists {
 		timer.Stop()
 		delete(s.gracePeriodTimers, roomID)
-		log.Printf("Cancelled grace period for room %s", roomID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Msg("cancelled grace period")
 	}
 }
 
 func (s *presenceService) setRoomOffline(ctx context.Context, roomID string) error {
+	l := pkglog.L()
+
 	if err := s.store.SetRoomOffline(ctx, roomID); err != nil {
 		return err
 	}
 
 	// Publish live status update for multi-instance sync
 	if err := s.store.PublishLiveStatusUpdate(ctx, roomID, false); err != nil {
-		log.Printf("Failed to publish live status update: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish live status update")
 	}
 
-	log.Printf("Room %s is now offline", roomID)
+	l.Info().Str("room_id", roomID).Msg("room is now offline")
 	return nil
 }
 
@@ -302,7 +317,8 @@ func (s *presenceService) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 
-	log.Println("Presence service started")
+	l := pkglog.L()
+	l.Info().Msg("presence service started")
 	return nil
 }
 

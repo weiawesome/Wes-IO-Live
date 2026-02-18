@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
 
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/storage"
 )
 
@@ -76,7 +76,8 @@ func (u *S3Uploader) Start() {
 		u.wg.Add(1)
 		go u.worker(i)
 	}
-	log.Printf("S3 uploader started with %d workers", u.workers)
+	l := pkglog.L()
+	l.Info().Int("workers", u.workers).Msg("s3 uploader started")
 }
 
 // Stop gracefully stops all workers.
@@ -84,7 +85,8 @@ func (u *S3Uploader) Stop() {
 	u.cancel()
 	close(u.queue)
 	u.wg.Wait()
-	log.Println("S3 uploader stopped")
+	l := pkglog.L()
+	l.Info().Msg("s3 uploader stopped")
 }
 
 // Upload queues a file for upload.
@@ -123,6 +125,7 @@ func (u *S3Uploader) worker(id int) {
 
 // processTask handles a single upload task with retries.
 func (u *S3Uploader) processTask(task *UploadTask) {
+	l := pkglog.L()
 	var lastErr error
 
 	for attempt := 0; attempt <= u.maxRetries; attempt++ {
@@ -139,10 +142,10 @@ func (u *S3Uploader) processTask(task *UploadTask) {
 		}
 
 		lastErr = err
-		log.Printf("Upload attempt %d failed for %s: %v", attempt+1, task.S3Key, err)
+		l.Warn().Err(err).Int("attempt", attempt+1).Str("s3_key", task.S3Key).Msg("upload attempt failed")
 	}
 
-	log.Printf("Upload failed after %d attempts for %s: %v", u.maxRetries+1, task.S3Key, lastErr)
+	l.Error().Err(lastErr).Int("attempts", u.maxRetries+1).Str("s3_key", task.S3Key).Msg("upload failed after retries")
 	if task.OnComplete != nil {
 		task.OnComplete(lastErr)
 	}

@@ -3,23 +3,23 @@ package registry
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/config"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type RedisRegistry struct {
-	client           *redis.Client
-	advertiseAddress string
-	prefix           string
-	keyTTL           time.Duration
+	client            *redis.Client
+	advertiseAddress  string
+	prefix            string
+	keyTTL            time.Duration
 	heartbeatInterval time.Duration
-	managedKeys      map[string]struct{} // keys managed by this instance
-	mu               sync.RWMutex
-	cancel           context.CancelFunc
+	managedKeys       map[string]struct{} // keys managed by this instance
+	mu                sync.RWMutex
+	cancel            context.CancelFunc
 }
 
 func NewRedisRegistry(cfg config.RedisConfig, advertiseAddress string) (*RedisRegistry, error) {
@@ -37,12 +37,12 @@ func NewRedisRegistry(cfg config.RedisConfig, advertiseAddress string) (*RedisRe
 	}
 
 	return &RedisRegistry{
-		client:           client,
-		advertiseAddress: advertiseAddress,
-		prefix:           cfg.RegistryPrefix,
-		keyTTL:           cfg.KeyTTL,
+		client:            client,
+		advertiseAddress:  advertiseAddress,
+		prefix:            cfg.RegistryPrefix,
+		keyTTL:            cfg.KeyTTL,
 		heartbeatInterval: cfg.HeartbeatInterval,
-		managedKeys:      make(map[string]struct{}),
+		managedKeys:       make(map[string]struct{}),
 	}, nil
 }
 
@@ -61,7 +61,8 @@ func (r *RedisRegistry) Register(ctx context.Context, roomID, sessionID string) 
 	r.managedKeys[key] = struct{}{}
 	r.mu.Unlock()
 
-	log.Printf("Registered room-session %s:%s -> %s", roomID, sessionID, r.advertiseAddress)
+	l := log.L()
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Str("address", r.advertiseAddress).Msg("registered room-session")
 	return nil
 }
 
@@ -76,7 +77,8 @@ func (r *RedisRegistry) Deregister(ctx context.Context, roomID, sessionID string
 	delete(r.managedKeys, key)
 	r.mu.Unlock()
 
-	log.Printf("Deregistered room-session %s:%s", roomID, sessionID)
+	l := log.L()
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("deregistered room-session")
 	return nil
 }
 
@@ -99,7 +101,8 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context) error {
 	r.cancel = cancel
 
 	go r.heartbeatLoop(ctx)
-	log.Printf("Registry heartbeat started (interval: %v, TTL: %v)", r.heartbeatInterval, r.keyTTL)
+	l := log.L()
+	l.Info().Dur("interval", r.heartbeatInterval).Dur("ttl", r.keyTTL).Msg("registry heartbeat started")
 	return nil
 }
 
@@ -127,7 +130,8 @@ func (r *RedisRegistry) refreshKeys(ctx context.Context) {
 
 	for _, key := range keys {
 		if err := r.client.Set(ctx, key, r.advertiseAddress, r.keyTTL).Err(); err != nil {
-			log.Printf("Failed to refresh key %s: %v", key, err)
+			l := log.L()
+			l.Error().Str("key", key).Err(err).Msg("failed to refresh key")
 		}
 	}
 }

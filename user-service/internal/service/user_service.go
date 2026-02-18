@@ -8,9 +8,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/weiawesome/wes-io-live/pkg/log"
+	pb "github.com/weiawesome/wes-io-live/proto/auth"
+	"github.com/weiawesome/wes-io-live/user-service/internal/audit"
 	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/user-service/internal/repository"
-	pb "github.com/weiawesome/wes-io-live/proto/auth"
 )
 
 var (
@@ -40,9 +42,12 @@ func NewUserService(repo repository.UserRepository, authServiceAddr string) (Use
 
 // Register registers a new user.
 func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequest) (*domain.AuthResponse, error) {
+	l := log.Ctx(ctx)
+
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
+		l.Error().Err(err).Msg("failed to hash password")
 		return nil, err
 	}
 
@@ -56,6 +61,7 @@ func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequ
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
+		l.Error().Err(err).Msg("failed to create user")
 		return nil, err
 	}
 
@@ -67,8 +73,11 @@ func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequ
 		Roles:    user.Roles,
 	})
 	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, user.ID).Msg("failed to generate tokens after register")
 		return nil, err
 	}
+
+	audit.Log(ctx, audit.ActionRegister, user.ID, "user registered")
 
 	return &domain.AuthResponse{
 		User:         user.ToResponse(),
@@ -80,17 +89,22 @@ func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequ
 
 // Login authenticates a user.
 func (s *userServiceImpl) Login(ctx context.Context, req *domain.LoginRequest) (*domain.AuthResponse, error) {
+	l := log.Ctx(ctx)
+
 	// Find user
 	user, err := s.repo.GetByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
+			audit.LogWithDetail(ctx, audit.ActionLoginFailed, "", req.Email, "login failed: user not found")
 			return nil, ErrInvalidCredentials
 		}
+		l.Error().Err(err).Msg("failed to get user by email")
 		return nil, err
 	}
 
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		audit.LogWithDetail(ctx, audit.ActionLoginFailed, user.ID, req.Email, "login failed: wrong password")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -102,8 +116,11 @@ func (s *userServiceImpl) Login(ctx context.Context, req *domain.LoginRequest) (
 		Roles:    user.Roles,
 	})
 	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, user.ID).Msg("failed to generate tokens after login")
 		return nil, err
 	}
+
+	audit.Log(ctx, audit.ActionLogin, user.ID, "user logged in")
 
 	return &domain.AuthResponse{
 		User:         user.ToResponse(),
@@ -115,11 +132,14 @@ func (s *userServiceImpl) Login(ctx context.Context, req *domain.LoginRequest) (
 
 // RefreshToken refreshes a user's access token.
 func (s *userServiceImpl) RefreshToken(ctx context.Context, req *domain.RefreshTokenRequest) (*domain.AuthResponse, error) {
+	l := log.Ctx(ctx)
+
 	// Refresh token
 	tokenResp, err := s.authClient.RefreshToken(ctx, &pb.RefreshTokenRequest{
 		RefreshToken: req.RefreshToken,
 	})
 	if err != nil {
+		l.Warn().Err(err).Msg("failed to refresh token")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -128,6 +148,7 @@ func (s *userServiceImpl) RefreshToken(ctx context.Context, req *domain.RefreshT
 		AccessToken: tokenResp.AccessToken,
 	})
 	if err != nil || !validateResp.Valid {
+		l.Warn().Err(err).Msg("refreshed token validation failed")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -137,12 +158,15 @@ func (s *userServiceImpl) RefreshToken(ctx context.Context, req *domain.RefreshT
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrInvalidCredentials
 		}
+		l.Error().Err(err).Str(log.FieldUserID, validateResp.UserId).Msg("failed to get user after token refresh")
 		return nil, err
 	}
 
+	audit.Log(ctx, audit.ActionRefreshToken, user.ID, "token refreshed")
+
 	// Return new tokens
 	return &domain.AuthResponse{
-		User: user.ToResponse(),
+		User:         user.ToResponse(),
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		ExpiresAt:    tokenResp.AccessExpiresAt,
@@ -151,19 +175,30 @@ func (s *userServiceImpl) RefreshToken(ctx context.Context, req *domain.RefreshT
 
 // Logout revokes user tokens.
 func (s *userServiceImpl) Logout(ctx context.Context, userID string) error {
+	l := log.Ctx(ctx)
+
 	_, err := s.authClient.RevokeTokens(ctx, &pb.RevokeTokensRequest{
 		UserId: userID,
 	})
-	return err
+	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to revoke tokens")
+		return err
+	}
+
+	audit.Log(ctx, audit.ActionLogout, userID, "user logged out")
+	return nil
 }
 
 // GetUser retrieves a user by ID.
 func (s *userServiceImpl) GetUser(ctx context.Context, userID string) (*domain.UserResponse, error) {
+	l := log.Ctx(ctx)
+
 	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to get user")
 		return nil, err
 	}
 
@@ -173,11 +208,14 @@ func (s *userServiceImpl) GetUser(ctx context.Context, userID string) (*domain.U
 
 // UpdateUser updates a user.
 func (s *userServiceImpl) UpdateUser(ctx context.Context, userID string, req *domain.UpdateUserRequest) (*domain.UserResponse, error) {
+	l := log.Ctx(ctx)
+
 	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to get user for update")
 		return nil, err
 	}
 
@@ -186,8 +224,11 @@ func (s *userServiceImpl) UpdateUser(ctx context.Context, userID string, req *do
 	}
 
 	if err := s.repo.Update(ctx, user); err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to update user")
 		return nil, err
 	}
+
+	audit.Log(ctx, audit.ActionUpdateProfile, userID, "profile updated")
 
 	resp := user.ToResponse()
 	return &resp, nil
@@ -195,11 +236,14 @@ func (s *userServiceImpl) UpdateUser(ctx context.Context, userID string, req *do
 
 // ChangePassword changes user password after verifying current password.
 func (s *userServiceImpl) ChangePassword(ctx context.Context, userID string, req *domain.ChangePasswordRequest) error {
+	l := log.Ctx(ctx)
+
 	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return ErrUserNotFound
 		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to get user for password change")
 		return err
 	}
 
@@ -211,19 +255,36 @@ func (s *userServiceImpl) ChangePassword(ctx context.Context, userID string, req
 	// Hash new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		l.Error().Err(err).Msg("failed to hash new password")
 		return err
 	}
 	user.PasswordHash = string(hashedPassword)
 
-	return s.repo.Update(ctx, user)
+	if err := s.repo.Update(ctx, user); err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to update password")
+		return err
+	}
+
+	audit.Log(ctx, audit.ActionChangePassword, userID, "password changed")
+	return nil
 }
 
 // DeleteUser deletes a user.
 func (s *userServiceImpl) DeleteUser(ctx context.Context, userID string) error {
-	// Revoke tokens first
-	s.authClient.RevokeTokens(ctx, &pb.RevokeTokensRequest{
-		UserId: userID,
-	})
+	l := log.Ctx(ctx)
 
-	return s.repo.Delete(ctx, userID)
+	// Revoke tokens first
+	if _, err := s.authClient.RevokeTokens(ctx, &pb.RevokeTokensRequest{
+		UserId: userID,
+	}); err != nil {
+		l.Warn().Err(err).Str(log.FieldUserID, userID).Msg("failed to revoke tokens before delete")
+	}
+
+	if err := s.repo.Delete(ctx, userID); err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to delete user")
+		return err
+	}
+
+	audit.Log(ctx, audit.ActionDeleteAccount, userID, "account deleted")
+	return nil
 }

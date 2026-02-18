@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/delivery"
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/registry"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/chat"
 )
 
@@ -37,9 +37,11 @@ func NewDispatcher(reg registry.RegistryLookup, del delivery.DeliveryClient) *Di
 }
 
 func (d *Dispatcher) HandleMessage(ctx context.Context, key, value []byte) error {
+	l := log.Ctx(ctx)
+
 	var msg ChatMessage
 	if err := json.Unmarshal(value, &msg); err != nil {
-		log.Printf("Failed to unmarshal message: %v", err)
+		l.Warn().Err(err).Msg("failed to unmarshal message")
 		return nil // skip malformed messages
 	}
 
@@ -47,9 +49,9 @@ func (d *Dispatcher) HandleMessage(ctx context.Context, key, value []byte) error
 	addr, err := d.registry.Lookup(ctx, msg.RoomID, msg.SessionID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not registered") {
-			log.Printf("Room-session %s:%s not registered, skipping", msg.RoomID, msg.SessionID)
+			l.Debug().Str("room_id", msg.RoomID).Str("session_id", msg.SessionID).Msg("room-session not registered, skipping")
 		} else {
-			log.Printf("Registry lookup failed for %s:%s: %v", msg.RoomID, msg.SessionID, err)
+			l.Error().Err(err).Str("room_id", msg.RoomID).Str("session_id", msg.SessionID).Msg("registry lookup failed")
 		}
 		return nil // skip, don't block consumer
 	}
@@ -59,24 +61,29 @@ func (d *Dispatcher) HandleMessage(ctx context.Context, key, value []byte) error
 		RoomId:    msg.RoomID,
 		SessionId: msg.SessionID,
 		Message: &pb.ChatMessagePayload{
-			MessageId:     msg.MessageID,
-			UserId:        msg.UserID,
-			Username:      msg.Username,
-			RoomId:        msg.RoomID,
-			SessionId:     msg.SessionID,
+			MessageId:       msg.MessageID,
+			UserId:          msg.UserID,
+			Username:        msg.Username,
+			RoomId:          msg.RoomID,
+			SessionId:       msg.SessionID,
 			TimestampUnixMs: msg.Timestamp.UnixMilli(),
-			Content:       msg.Content,
+			Content:         msg.Content,
 		},
 	}
 
 	resp, err := d.delivery.DeliverMessage(ctx, addr, req)
 	if err != nil {
-		log.Printf("gRPC delivery failed for msg=%s to %s: %v", msg.MessageID, addr, err)
+		l.Error().Err(err).Str("message_id", msg.MessageID).Str("addr", addr).Msg("grpc delivery failed")
 		return nil // skip, don't block consumer
 	}
 
-	log.Printf("Delivered msg=%s to room=%s session=%s via %s (%d clients)",
-		msg.MessageID, msg.RoomID, msg.SessionID, addr, resp.DeliveredCount)
+	l.Info().
+		Str("message_id", msg.MessageID).
+		Str("room_id", msg.RoomID).
+		Str("session_id", msg.SessionID).
+		Str("addr", addr).
+		Int32("delivered_count", resp.DeliveredCount).
+		Msg("message delivered")
 
 	return nil
 }

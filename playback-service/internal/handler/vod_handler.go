@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/weiawesome/wes-io-live/playback-service/internal/service"
 )
 
@@ -23,8 +25,8 @@ func NewVODHandler(playbackSvc *service.PlaybackService) *VODHandler {
 }
 
 // RegisterRoutes registers the VOD playback routes.
-func (h *VODHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/vod/", h.handleVOD)
+func (h *VODHandler) RegisterRoutes(r *gin.Engine) {
+	r.Any("/vod/*path", h.handleVOD)
 }
 
 // handleVOD handles VOD requests.
@@ -32,7 +34,10 @@ func (h *VODHandler) RegisterRoutes(mux *http.ServeMux) {
 // - GET /vod/{roomID} - List all VOD sessions for a room
 // - GET /vod/{roomID}/latest - Get the latest VOD URL
 // - GET /vod/{roomID}/{sessionID}/{file} - Stream VOD content
-func (h *VODHandler) handleVOD(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) handleVOD(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
+
 	// Set CORS headers
 	setCORSHeaders(w)
 
@@ -47,8 +52,8 @@ func (h *VODHandler) handleVOD(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse path: /vod/{roomID}/...
-	path := strings.TrimPrefix(r.URL.Path, "/vod/")
-	if path == "" || path == r.URL.Path {
+	path := strings.TrimPrefix(c.Param("path"), "/")
+	if path == "" {
 		http.Error(w, "Room ID required", http.StatusBadRequest)
 		return
 	}

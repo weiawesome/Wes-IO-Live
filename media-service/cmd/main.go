@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 
 	"github.com/weiawesome/wes-io-live/media-service/internal/config"
 	"github.com/weiawesome/wes-io-live/media-service/internal/service"
@@ -21,31 +22,39 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load configuration")
 	}
 
-	log.Printf("Starting Media Service on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		ServiceName: "media-service",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("starting media-service")
 
 	// Ensure HLS output directory exists
 	if err := os.MkdirAll(cfg.HLS.OutputDir, 0755); err != nil {
-		log.Fatalf("Failed to create HLS output directory: %v", err)
+		logger.Fatal().Err(err).Str("dir", cfg.HLS.OutputDir).Msg("failed to create hls output directory")
 	}
 
 	// Initialize PubSub
 	ps, err := pubsub.NewPubSub(cfg.PubSub)
 	if err != nil {
-		log.Fatalf("Failed to initialize pubsub: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize pubsub")
 	}
 	defer ps.Close()
-	log.Println("Connected to Redis PubSub")
+	logger.Info().Str("driver", cfg.PubSub.Driver).Msg("pubsub connected")
 
 	// Get ICE servers
 	iceServers, err := cfg.WebRTC.GetICEServers()
 	if err != nil {
-		log.Printf("Warning: Failed to get ICE servers: %v", err)
+		logger.Warn().Err(err).Msg("failed to get ice servers")
 		iceServers = nil
 	}
-	log.Printf("ICE servers configured: %d", len(iceServers))
+	logger.Info().Int("count", len(iceServers)).Msg("ice servers configured")
 
 	// Initialize peer manager
 	peerMgr := webrtc.NewPeerManager(iceServers)
@@ -72,9 +81,9 @@ func main() {
 			PublicURL:       cfg.Storage.S3.PublicURL,
 		})
 		if err != nil {
-			log.Printf("Warning: Failed to initialize S3 storage: %v", err)
+			logger.Warn().Err(err).Msg("failed to initialize s3 storage")
 		} else {
-			log.Println("S3 storage initialized for VOD")
+			logger.Info().Msg("s3 storage initialized for vod")
 		}
 	}
 
@@ -91,13 +100,13 @@ func main() {
 
 		store, err := service.NewRedisSessionStore(redisCfg)
 		if err != nil {
-			log.Fatalf("Failed to create Redis session store: %v", err)
+			logger.Fatal().Err(err).Msg("failed to create redis session store")
 		}
 		sessionStore = store
-		log.Println("Using Redis session store")
+		logger.Info().Msg("using redis session store")
 	default:
 		sessionStore = service.NewMemorySessionStore()
-		log.Println("Using in-memory session store")
+		logger.Info().Msg("using in-memory session store")
 	}
 
 	// Initialize VOD manager if enabled
@@ -111,7 +120,7 @@ func main() {
 		})
 		vodManager.Start()
 		defer vodManager.Stop()
-		log.Println("VOD manager initialized")
+		logger.Info().Msg("vod manager initialized")
 	}
 
 	// Initialize thumbnail service if enabled and VOD manager has uploader
@@ -123,7 +132,7 @@ func main() {
 			Uploader:      vodManager.GetUploader(),
 		})
 		defer thumbnailService.Stop()
-		log.Println("Thumbnail service initialized")
+		logger.Info().Msg("thumbnail service initialized")
 	}
 
 	// Initialize media service
@@ -134,7 +143,7 @@ func main() {
 	defer cancel()
 
 	if err := mediaSvc.Start(ctx); err != nil {
-		log.Fatalf("Failed to start media service: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start media service")
 	}
 	defer mediaSvc.Stop()
 
@@ -147,9 +156,11 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
+	handler := pkglog.HTTPMiddleware(logger)(mux)
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -157,9 +168,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Media Service listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("media-service listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logger.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
@@ -168,15 +179,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down Media Service...")
+	logger.Info().Msg("shutting down media-service")
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error().Err(err).Msg("server forced to shutdown")
 	}
 
-	log.Println("Media Service stopped")
+	logger.Info().Msg("media-service stopped")
 }

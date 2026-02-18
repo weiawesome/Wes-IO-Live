@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 
 	"google.golang.org/grpc"
@@ -10,6 +9,7 @@ import (
 	"github.com/weiawesome/wes-io-live/auth-service/internal/config"
 	"github.com/weiawesome/wes-io-live/auth-service/internal/service"
 	"github.com/weiawesome/wes-io-live/pkg/jwt"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/auth"
 )
 
@@ -17,8 +17,17 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
+
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "auth-service",
+	})
+	logger := pkglog.L()
 
 	// Initialize JWT manager
 	jwtManager, err := jwt.NewManager(
@@ -27,11 +36,14 @@ func main() {
 		cfg.JWT.Issuer,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create JWT manager: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create JWT manager")
 	}
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with logging interceptors
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(pkglog.UnaryServerInterceptor(logger)),
+		grpc.StreamInterceptor(pkglog.StreamServerInterceptor(logger)),
+	)
 	authService := service.NewAuthService(jwtManager)
 	pb.RegisterAuthServiceServer(grpcServer, authService)
 
@@ -39,11 +51,11 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.GRPCPort)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+		logger.Fatal().Str("addr", addr).Err(err).Msg("failed to listen")
 	}
 
-	log.Printf("Auth Service starting on %s", addr)
+	logger.Info().Str("addr", addr).Msg("auth service starting")
 	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+		logger.Fatal().Err(err).Msg("failed to serve")
 	}
 }

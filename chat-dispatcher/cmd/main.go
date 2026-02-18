@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,28 +14,41 @@ import (
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/delivery"
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/dispatcher"
 	"github.com/weiawesome/wes-io-live/chat-dispatcher/internal/registry"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	log.Printf("Starting Chat Dispatcher")
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "chat-dispatcher",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Msg("starting chat dispatcher")
 
 	// Initialize Redis registry (read-only)
 	reg, err := registry.NewRedisLookupClient(cfg.Redis)
 	if err != nil {
-		log.Fatalf("Failed to initialize Redis registry: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize redis registry")
 	}
-	log.Printf("Connected to Redis at %s", cfg.Redis.Address)
+	logger.Info().Str("address", cfg.Redis.Address).Msg("connected to redis")
 
 	// Initialize gRPC connection pool
 	grpcPool := delivery.NewGRPCPool(cfg.GRPC)
-	log.Printf("gRPC pool initialized (dial_timeout=%v, call_timeout=%v, idle_timeout=%v)",
-		cfg.GRPC.DialTimeout, cfg.GRPC.CallTimeout, cfg.GRPC.IdleTimeout)
+	logger.Info().
+		Dur("dial_timeout", cfg.GRPC.DialTimeout).
+		Dur("call_timeout", cfg.GRPC.CallTimeout).
+		Dur("idle_timeout", cfg.GRPC.IdleTimeout).
+		Msg("grpc pool initialized")
 
 	// Initialize dispatcher
 	d := dispatcher.NewDispatcher(reg, grpcPool)
@@ -44,10 +56,13 @@ func main() {
 	// Initialize Kafka consumer
 	cons, err := consumer.NewConsumer(cfg.Kafka, d)
 	if err != nil {
-		log.Fatalf("Failed to create Kafka consumer: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create kafka consumer")
 	}
-	log.Printf("Kafka consumer created (brokers=%s, topic=%s, group=%s)",
-		cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID)
+	logger.Info().
+		Str("brokers", cfg.Kafka.Brokers).
+		Str("topic", cfg.Kafka.Topic).
+		Str("group", cfg.Kafka.GroupID).
+		Msg("kafka consumer created")
 
 	// Start health HTTP server
 	mux := http.NewServeMux()
@@ -62,16 +77,16 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      pkglog.HTTPMiddleware(logger)(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
 
 	go func() {
-		log.Printf("Health server listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("health server listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Health server error: %v", err)
+			logger.Fatal().Err(err).Msg("health server error")
 		}
 	}()
 
@@ -89,22 +104,22 @@ func main() {
 
 	select {
 	case <-quit:
-		log.Println("Received shutdown signal")
+		logger.Info().Msg("received shutdown signal")
 	case err := <-consumerDone:
 		if err != nil {
-			log.Printf("Consumer exited with error: %v", err)
+			logger.Error().Err(err).Msg("consumer exited with error")
 		}
 	}
 
 	// Graceful shutdown
-	log.Println("Shutting down Chat Dispatcher...")
+	logger.Info().Msg("shutting down chat dispatcher")
 	cancel()
 
 	// Wait for consumer to stop
 	select {
 	case <-consumerDone:
 	case <-time.After(10 * time.Second):
-		log.Println("Consumer shutdown timed out")
+		logger.Warn().Msg("consumer shutdown timed out")
 	}
 
 	cons.Close()
@@ -116,5 +131,5 @@ func main() {
 	grpcPool.Close()
 	reg.Close()
 
-	log.Println("Chat Dispatcher stopped")
+	logger.Info().Msg("chat dispatcher stopped")
 }

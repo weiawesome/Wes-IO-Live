@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/pubsub"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/client"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/config"
@@ -23,39 +23,43 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load configuration")
 	}
 
-	log.Printf("Starting Signal Service on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	pkglog.Init(pkglog.Config{Level: cfg.Log.Level, ServiceName: "signal-service"})
+	logger := pkglog.L()
+
+	logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("starting signal-service")
 
 	// Initialize PubSub
 	ps, err := pubsub.NewPubSub(cfg.PubSub)
 	if err != nil {
-		log.Fatalf("Failed to initialize pubsub: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize pubsub")
 	}
 	defer ps.Close()
-	log.Println("Connected to Redis PubSub")
+	logger.Info().Msg("connected to redis pubsub")
 
 	// Initialize clients
 	authClient, err := client.NewAuthClient(cfg.Auth.GRPCAddress)
 	if err != nil {
-		log.Fatalf("Failed to create auth client: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create auth client")
 	}
 	defer authClient.Close()
-	log.Printf("Connected to Auth Service at %s", cfg.Auth.GRPCAddress)
+	logger.Info().Str("address", cfg.Auth.GRPCAddress).Msg("connected to auth service")
 
 	roomClient := client.NewRoomClient(cfg.Room.HTTPAddress, cfg.Room.CacheTTL)
-	log.Printf("Room Service client configured for %s", cfg.Room.HTTPAddress)
+	logger.Info().Str("address", cfg.Room.HTTPAddress).Msg("room service client configured")
 
 	// Initialize Kafka producer for broadcast events
 	var kafkaProducer kafka.BroadcastEventProducer
 	kafkaProducer, err = kafka.NewConfluentProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.Partitions)
 	if err != nil {
-		log.Printf("Warning: Failed to create Kafka producer: %v (broadcast events will not be sent)", err)
+		logger.Warn().Err(err).Msg("failed to create kafka producer, broadcast events disabled")
 		kafkaProducer = nil // Service will work without Kafka
 	} else {
 		defer kafkaProducer.Close()
-		log.Printf("Connected to Kafka at %s, topic: %s", cfg.Kafka.Brokers, cfg.Kafka.Topic)
+		logger.Info().Str("brokers", cfg.Kafka.Brokers).Str("topic", cfg.Kafka.Topic).Msg("connected to kafka")
 	}
 
 	// Initialize hub
@@ -70,7 +74,7 @@ func main() {
 	defer cancel()
 
 	if err := signalSvc.Start(ctx); err != nil {
-		log.Fatalf("Failed to start signal service: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start signal service")
 	}
 	defer signalSvc.Stop()
 
@@ -89,7 +93,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      pkglog.HTTPMiddleware(logger)(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -97,9 +101,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Signal Service listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("signal-service listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logger.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
@@ -108,15 +112,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down Signal Service...")
+	logger.Info().Msg("shutting down signal-service")
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error().Err(err).Msg("server forced to shutdown")
 	}
 
-	log.Println("Signal Service stopped")
+	logger.Info().Msg("signal-service stopped")
 }

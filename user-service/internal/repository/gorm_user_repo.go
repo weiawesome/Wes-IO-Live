@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
 )
 
@@ -23,6 +24,8 @@ func NewGormUserRepository(db *gorm.DB) *GormUserRepository {
 
 // Create creates a new user.
 func (r *GormUserRepository) Create(ctx context.Context, user *domain.User) error {
+	l := log.Ctx(ctx)
+
 	user.ID = uuid.New().String()
 	if user.Roles == nil {
 		user.Roles = []string{"user"}
@@ -31,23 +34,28 @@ func (r *GormUserRepository) Create(ctx context.Context, user *domain.User) erro
 	model := domain.UserToModel(user)
 	result := r.db.WithContext(ctx).Create(model)
 	if result.Error != nil {
+		l.Error().Err(result.Error).Str("email", user.Email).Msg("failed to create user in db")
 		return r.handleError(result.Error)
 	}
 
 	// Update the domain object with generated timestamps
 	user.CreatedAt = model.CreatedAt
 	user.UpdatedAt = model.UpdatedAt
+	l.Debug().Str(log.FieldUserID, user.ID).Msg("user created in db")
 	return nil
 }
 
 // GetByID retrieves a user by ID.
 func (r *GormUserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
+	l := log.Ctx(ctx)
+
 	var model domain.UserModel
 	result := r.db.WithContext(ctx).First(&model, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
+		l.Error().Err(result.Error).Str(log.FieldUserID, id).Msg("failed to get user by id")
 		return nil, result.Error
 	}
 	return model.ToDomain(), nil
@@ -55,12 +63,15 @@ func (r *GormUserRepository) GetByID(ctx context.Context, id string) (*domain.Us
 
 // GetByEmail retrieves a user by email.
 func (r *GormUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	l := log.Ctx(ctx)
+
 	var model domain.UserModel
 	result := r.db.WithContext(ctx).First(&model, "email = ?", email)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
+		l.Error().Err(result.Error).Str("email", email).Msg("failed to get user by email")
 		return nil, result.Error
 	}
 	return model.ToDomain(), nil
@@ -68,6 +79,8 @@ func (r *GormUserRepository) GetByEmail(ctx context.Context, email string) (*dom
 
 // Update updates a user.
 func (r *GormUserRepository) Update(ctx context.Context, user *domain.User) error {
+	l := log.Ctx(ctx)
+
 	model := domain.UserToModel(user)
 	result := r.db.WithContext(ctx).Model(&domain.UserModel{}).
 		Where("id = ?", user.ID).
@@ -76,6 +89,7 @@ func (r *GormUserRepository) Update(ctx context.Context, user *domain.User) erro
 			"password_hash": model.PasswordHash,
 		})
 	if result.Error != nil {
+		l.Error().Err(result.Error).Str(log.FieldUserID, user.ID).Msg("failed to update user in db")
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
@@ -86,12 +100,15 @@ func (r *GormUserRepository) Update(ctx context.Context, user *domain.User) erro
 	var updated domain.UserModel
 	r.db.WithContext(ctx).First(&updated, "id = ?", user.ID)
 	user.UpdatedAt = updated.UpdatedAt
+	l.Debug().Str(log.FieldUserID, user.ID).Msg("user updated in db")
 	return nil
 }
 
 // Delete soft-deletes a user and obfuscates unique fields to allow re-registration.
 func (r *GormUserRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	l := log.Ctx(ctx)
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// First check if user exists
 		var model domain.UserModel
 		if err := tx.First(&model, "id = ?", id).Error; err != nil {
@@ -113,6 +130,13 @@ func (r *GormUserRepository) Delete(ctx context.Context, id string) error {
 		// Soft delete the user
 		return tx.Delete(&domain.UserModel{}, "id = ?", id).Error
 	})
+	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, id).Msg("failed to delete user from db")
+		return err
+	}
+
+	l.Debug().Str(log.FieldUserID, id).Msg("user deleted from db")
+	return nil
 }
 
 // handleError converts database-specific errors to domain errors.

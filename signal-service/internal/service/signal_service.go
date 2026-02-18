@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/pubsub"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/client"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/domain"
@@ -169,6 +169,8 @@ func (s *signalService) HandleStartBroadcast(ctx context.Context, c *hub.Client,
 	c.Session.JoinRoom(roomID, true)
 	s.hub.JoinRoom(c, roomID)
 
+	l := pkglog.L()
+
 	// Publish start broadcast event to Media Service
 	event, err := pubsub.NewEvent(pubsub.EventStartBroadcast, roomID, &pubsub.StartBroadcastPayload{
 		RoomID: roomID,
@@ -184,7 +186,7 @@ func (s *signalService) HandleStartBroadcast(ctx context.Context, c *hub.Client,
 
 	channel := pubsub.SignalToMediaChannel(roomID)
 	if err := s.pubsub.Publish(ctx, channel, event); err != nil {
-		log.Printf("Failed to publish start_broadcast event: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to publish start_broadcast event")
 		s.mu.Lock()
 		delete(s.activeBroadcasts, roomID)
 		delete(s.broadcasterUserIDs, roomID)
@@ -195,12 +197,12 @@ func (s *signalService) HandleStartBroadcast(ctx context.Context, c *hub.Client,
 	// Send broadcast_started event to Kafka for presence-service
 	if s.kafkaProducer != nil {
 		if err := s.kafkaProducer.ProduceBroadcastStarted(ctx, roomID, c.Session.GetUserID()); err != nil {
-			log.Printf("Failed to produce broadcast_started event to Kafka: %v", err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("failed to produce broadcast_started event to kafka")
 			// Don't fail the broadcast, Kafka is non-critical
 		}
 	}
 
-	log.Printf("Start broadcast event published for room %s", roomID)
+	l.Info().Str("room_id", roomID).Msg("start broadcast event published")
 	return nil
 }
 
@@ -257,7 +259,8 @@ func (s *signalService) HandleStopBroadcast(ctx context.Context, c *hub.Client, 
 	// Send broadcast_stopped event to Kafka for presence-service
 	if s.kafkaProducer != nil {
 		if err := s.kafkaProducer.ProduceBroadcastStopped(ctx, roomID, broadcasterUserID, kafka.ReasonExplicit); err != nil {
-			log.Printf("Failed to produce broadcast_stopped event to Kafka: %v", err)
+			l := pkglog.L()
+			l.Error().Err(err).Str("room_id", roomID).Msg("failed to produce broadcast_stopped event to kafka")
 		}
 	}
 
@@ -317,7 +320,8 @@ func (s *signalService) HandleDisconnect(ctx context.Context, c *hub.Client) err
 		// This will trigger grace period handling in presence-service
 		if s.kafkaProducer != nil {
 			if err := s.kafkaProducer.ProduceBroadcastStopped(ctx, roomID, broadcasterUserID, kafka.ReasonDisconnect); err != nil {
-				log.Printf("Failed to produce broadcast_stopped (disconnect) event to Kafka: %v", err)
+				l := pkglog.L()
+				l.Error().Err(err).Str("room_id", roomID).Msg("failed to produce broadcast_stopped (disconnect) event to kafka")
 			}
 		}
 	}
@@ -339,7 +343,8 @@ func (s *signalService) Start(ctx context.Context) error {
 
 	go s.handleMediaEvents(ctx, eventCh)
 
-	log.Println("Signal service started, subscribed to media events")
+	l := pkglog.L()
+	l.Info().Msg("signal service started, subscribed to media events")
 	return nil
 }
 
@@ -365,11 +370,13 @@ func (s *signalService) handleMediaEvents(ctx context.Context, eventCh <-chan *p
 }
 
 func (s *signalService) processMediaEvent(event *pubsub.Event) {
+	l := pkglog.L()
+
 	switch event.Type {
 	case pubsub.EventBroadcastAnswer:
 		var payload pubsub.BroadcastAnswerPayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal broadcast answer: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal broadcast answer")
 			return
 		}
 		s.handleBroadcastAnswer(payload)
@@ -377,7 +384,7 @@ func (s *signalService) processMediaEvent(event *pubsub.Event) {
 	case pubsub.EventServerICECandidate:
 		var payload pubsub.ServerICECandidatePayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal server ICE candidate: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal server ICE candidate")
 			return
 		}
 		s.handleServerICECandidate(payload)
@@ -385,7 +392,7 @@ func (s *signalService) processMediaEvent(event *pubsub.Event) {
 	case pubsub.EventStreamReady:
 		var payload pubsub.StreamReadyPayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal stream ready: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal stream ready")
 			return
 		}
 		s.handleStreamReady(payload)
@@ -393,7 +400,7 @@ func (s *signalService) processMediaEvent(event *pubsub.Event) {
 	case pubsub.EventStreamEnded:
 		var payload pubsub.StreamEndedPayload
 		if err := event.UnmarshalPayload(&payload); err != nil {
-			log.Printf("Failed to unmarshal stream ended: %v", err)
+			l.Error().Err(err).Msg("failed to unmarshal stream ended")
 			return
 		}
 		s.handleStreamEnded(payload)
@@ -401,12 +408,14 @@ func (s *signalService) processMediaEvent(event *pubsub.Event) {
 }
 
 func (s *signalService) handleBroadcastAnswer(payload pubsub.BroadcastAnswerPayload) {
+	l := pkglog.L()
+
 	s.mu.RLock()
 	broadcasterID, exists := s.activeBroadcasts[payload.RoomID]
 	s.mu.RUnlock()
 
 	if !exists {
-		log.Printf("No active broadcast for room %s", payload.RoomID)
+		l.Warn().Str("room_id", payload.RoomID).Msg("no active broadcast")
 		return
 	}
 
@@ -416,7 +425,7 @@ func (s *signalService) handleBroadcastAnswer(payload pubsub.BroadcastAnswerPayl
 		Answer: json.RawMessage(payload.Answer),
 	})
 
-	log.Printf("Sent broadcast answer to client %s for room %s", broadcasterID, payload.RoomID)
+	l.Info().Str("room_id", payload.RoomID).Str("client_id", broadcasterID).Msg("sent broadcast answer to client")
 }
 
 func (s *signalService) handleServerICECandidate(payload pubsub.ServerICECandidatePayload) {
@@ -451,7 +460,8 @@ func (s *signalService) handleStreamReady(payload pubsub.StreamReadyPayload) {
 		HLSUrl: payload.HLSUrl,
 	}, "")
 
-	log.Printf("Stream ready for room %s: %s", payload.RoomID, payload.HLSUrl)
+	l := pkglog.L()
+	l.Info().Str("room_id", payload.RoomID).Str("hls_url", payload.HLSUrl).Msg("stream ready")
 }
 
 func (s *signalService) handleStreamEnded(payload pubsub.StreamEndedPayload) {
@@ -468,5 +478,6 @@ func (s *signalService) handleStreamEnded(payload pubsub.StreamEndedPayload) {
 		HLSUrl: "",
 	}, "")
 
-	log.Printf("Stream ended for room %s", payload.RoomID)
+	l := pkglog.L()
+	l.Info().Str("room_id", payload.RoomID).Msg("stream ended")
 }

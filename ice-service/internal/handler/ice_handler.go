@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/weiawesome/wes-io-live/ice-service/internal/config"
 )
 
@@ -19,8 +21,11 @@ func NewICEHandler(iceServers []config.ICEServer) *ICEHandler {
 	}
 }
 
-// ServeHTTP handles ICE server requests.
-func (h *ICEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// handleICE handles ICE server requests.
+func (h *ICEHandler) handleICE(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
+
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -63,6 +68,6 @@ func (h *ICEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // RegisterRoutes registers the ICE routes.
-func (h *ICEHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("/api/ice-servers", h)
+func (h *ICEHandler) RegisterRoutes(r *gin.Engine) {
+	r.Any("/api/ice-servers", h.handleICE)
 }
