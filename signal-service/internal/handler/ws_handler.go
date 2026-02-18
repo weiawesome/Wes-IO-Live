@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/hub"
 	"github.com/weiawesome/wes-io-live/signal-service/internal/service"
@@ -37,9 +37,11 @@ func NewWSHandler(h *hub.Hub, svc service.SignalService) *WSHandler {
 
 // HandleWebSocket handles WebSocket upgrade and message routing.
 func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	l := pkglog.L()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		l.Error().Err(err).Msg("websocket upgrade failed")
 		return
 	}
 
@@ -56,7 +58,7 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client.SetDisconnectHandler(func(c *hub.Client) {
 		ctx := context.Background()
 		if err := h.service.HandleDisconnect(ctx, c); err != nil {
-			log.Printf("Disconnect handler error for client %s: %v", c.ID, err)
+			l.Error().Err(err).Str("client_id", c.ID).Msg("disconnect handler error")
 		}
 	})
 
@@ -67,6 +69,8 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
+	l := pkglog.L()
+
 	var base domain.BaseMessage
 	if err := json.Unmarshal(message, &base); err != nil {
 		client.SendMessage(domain.NewErrorMessage(domain.ErrCodeBadRequest, "Invalid message format"))
@@ -83,7 +87,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleAuth(ctx, client, msg.Token); err != nil {
-			log.Printf("Auth failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("auth failed")
 		}
 
 	case domain.MsgTypeJoinRoom:
@@ -93,7 +97,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleJoinRoom(ctx, client, msg.RoomID); err != nil {
-			log.Printf("Join room failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("join room failed")
 		}
 
 	case domain.MsgTypeStartBroadcast:
@@ -103,7 +107,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleStartBroadcast(ctx, client, msg.RoomID, msg.Offer); err != nil {
-			log.Printf("Start broadcast failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("start broadcast failed")
 		}
 
 	case domain.MsgTypeICECandidate:
@@ -113,7 +117,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleICECandidate(ctx, client, msg.RoomID, msg.Candidate); err != nil {
-			log.Printf("ICE candidate failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("ice candidate failed")
 		}
 
 	case domain.MsgTypeStopBroadcast:
@@ -123,7 +127,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleStopBroadcast(ctx, client, msg.RoomID); err != nil {
-			log.Printf("Stop broadcast failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("stop broadcast failed")
 		}
 
 	case domain.MsgTypeLeaveRoom:
@@ -133,7 +137,7 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleLeaveRoom(ctx, client, msg.RoomID); err != nil {
-			log.Printf("Leave room failed for client %s: %v", client.ID, err)
+			l.Error().Err(err).Str("client_id", client.ID).Msg("leave room failed")
 		}
 
 	case domain.MsgTypePing:
