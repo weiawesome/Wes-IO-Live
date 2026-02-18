@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	"log"
 
 	"github.com/weiawesome/wes-io-live/pkg/jwt"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/auth"
 )
 
@@ -20,7 +20,8 @@ func NewAuthService(jwtManager *jwt.Manager) *AuthService {
 }
 
 func (s *AuthService) GenerateTokens(ctx context.Context, req *pb.GenerateTokensRequest) (*pb.GenerateTokensResponse, error) {
-	log.Printf("GenerateTokens called for user: %s", req.UserId)
+	l := log.Ctx(ctx)
+	l.Info().Str(log.FieldUserID, req.UserId).Msg("generating tokens")
 
 	accessToken, refreshToken, accessExp, refreshExp, err := s.jwtManager.GenerateTokenPair(
 		req.UserId,
@@ -29,7 +30,7 @@ func (s *AuthService) GenerateTokens(ctx context.Context, req *pb.GenerateTokens
 		req.Roles,
 	)
 	if err != nil {
-		log.Printf("Failed to generate tokens: %v", err)
+		l.Error().Err(err).Str(log.FieldUserID, req.UserId).Msg("failed to generate tokens")
 		return nil, err
 	}
 
@@ -42,9 +43,11 @@ func (s *AuthService) GenerateTokens(ctx context.Context, req *pb.GenerateTokens
 }
 
 func (s *AuthService) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
+	l := log.Ctx(ctx)
+
 	claims, err := s.jwtManager.ValidateToken(req.AccessToken)
 	if err != nil {
-		log.Printf("Token validation failed: %v", err)
+		l.Warn().Err(err).Msg("token validation failed")
 		return &pb.ValidateTokenResponse{
 			Valid:        false,
 			ErrorMessage: err.Error(),
@@ -61,11 +64,12 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *pb.ValidateTokenRe
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
-	log.Printf("RefreshToken called")
+	l := log.Ctx(ctx)
+	l.Info().Msg("refreshing token")
 
 	accessToken, refreshToken, accessExp, refreshExp, err := s.jwtManager.RefreshTokens(req.RefreshToken)
 	if err != nil {
-		log.Printf("Token refresh failed: %v", err)
+		l.Warn().Err(err).Msg("token refresh failed")
 		return &pb.RefreshTokenResponse{
 			ErrorMessage: err.Error(),
 		}, nil
@@ -80,7 +84,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequ
 }
 
 func (s *AuthService) RevokeTokens(ctx context.Context, req *pb.RevokeTokensRequest) (*pb.RevokeTokensResponse, error) {
-	log.Printf("RevokeTokens called for user: %s", req.UserId)
+	l := log.Ctx(ctx)
+	l.Info().Str(log.FieldUserID, req.UserId).Msg("revoking tokens")
 
 	s.jwtManager.RevokeUserTokens(req.UserId)
 
