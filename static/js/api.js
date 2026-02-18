@@ -34,17 +34,17 @@ const API = {
         } catch (_) {
             if (!response.ok) {
                 throw new Error(response.status === 502 || response.status === 503
-                    ? '服務暫時無法連線，請稍後再試'
-                    : '請求失敗，請稍後再試');
+                    ? 'Service temporarily unavailable, please try again later'
+                    : 'Request failed, please try again later');
             }
-            throw new Error('回應格式錯誤');
+            throw new Error('Invalid response format');
         }
 
         if (!response.ok) {
             const msg = typeof data === 'object' && data !== null
                 ? (data.error || data.message || data.msg)
                 : null;
-            throw new Error(typeof msg === 'string' ? msg : '請求失敗');
+            throw new Error(typeof msg === 'string' ? msg : 'Request failed');
         }
 
         return data;
