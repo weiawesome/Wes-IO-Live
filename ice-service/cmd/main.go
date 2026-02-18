@@ -3,13 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/ice-service/internal/config"
 	"github.com/weiawesome/wes-io-live/ice-service/internal/handler"
 )
@@ -18,39 +20,51 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	log.Printf("Starting ICE Service on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{
+		Level:       cfg.Log.Level,
+		Pretty:      cfg.Log.Level == "debug",
+		ServiceName: "ice-service",
+	})
+	logger := pkglog.L()
+
+	logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("starting ice service")
 
 	// Get ICE servers
-	log.Printf("Fetching ICE servers...")
+	logger.Info().Msg("fetching ICE servers")
 	iceServers, err := cfg.WebRTC.GetICEServers()
 	if err != nil {
-		log.Printf("Warning: Failed to get ICE servers: %v", err)
+		logger.Warn().Err(err).Msg("failed to get ice servers")
 		iceServers = nil
 	}
-	log.Printf("ICE servers configured: %d", len(iceServers))
+	logger.Info().Int("count", len(iceServers)).Msg("ice servers configured")
 	for i, server := range iceServers {
-		log.Printf("  Server %d: URLs=%v", i+1, server.URLs)
+		logger.Info().Int("index", i+1).Strs("urls", server.URLs).Msg("ice server")
 	}
 
 	// Initialize handler
 	iceHandler := handler.NewICEHandler(iceServers)
 
-	// Setup HTTP server
-	mux := http.NewServeMux()
-	iceHandler.RegisterRoutes(mux)
+	// Setup Gin router
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(pkglog.GinMiddleware(logger))
 
-	// Health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+	// Register routes
+	iceHandler.RegisterRoutes(r)
+
+	// Health check endpoints
+	r.GET("/healthz", func(c *gin.Context) {
+		c.String(http.StatusOK, "OK")
 	})
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -58,9 +72,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("ICE Service listening on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		logger.Info().Str("addr", server.Addr).Msg("ice service listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logger.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
@@ -69,15 +83,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down ICE Service...")
+	logger.Info().Msg("shutting down ice service")
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error().Err(err).Msg("server forced to shutdown")
 	}
 
-	log.Println("ICE Service stopped")
+	logger.Info().Msg("ice service stopped")
 }
