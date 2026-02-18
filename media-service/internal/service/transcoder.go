@@ -1,12 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -15,7 +16,36 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media/ivfwriter"
 	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
 	"github.com/weiawesome/wes-io-live/media-service/internal/config"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
+
+// ffmpegLogWriter returns an io.Writer that pipes FFmpeg stderr lines into zerolog.
+// Each line is logged at the appropriate level based on FFmpeg's output patterns.
+func ffmpegLogWriter(roomID, sessionID string) io.Writer {
+	pr, pw := io.Pipe()
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		// Increase buffer for long FFmpeg lines
+		scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			l := pkglog.L()
+			lower := strings.ToLower(line)
+			switch {
+			case strings.Contains(lower, "error"):
+				l.Error().Str("room_id", roomID).Str("session_id", sessionID).Str("source", "ffmpeg").Msg(line)
+			case strings.Contains(lower, "warning"):
+				l.Warn().Str("room_id", roomID).Str("session_id", sessionID).Str("source", "ffmpeg").Msg(line)
+			default:
+				l.Debug().Str("room_id", roomID).Str("session_id", sessionID).Str("source", "ffmpeg").Msg(line)
+			}
+		}
+	}()
+	return pw
+}
 
 // Transcoder handles video transcoding to HLS.
 type Transcoder struct {
@@ -218,8 +248,8 @@ func (t *Transcoder) StartHLS(roomID, sessionID string, videoTrack, audioTrack *
 		args = append(args, hlsArgs...)
 
 		cmd = exec.Command("ffmpeg", args...)
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
+		cmd.Stderr = ffmpegLogWriter(roomID, sessionID)
+		cmd.Stdout = io.Discard
 
 		if err := cmd.Start(); err != nil {
 			t.cleanupPipes(&transcoderProcess{videoPipe: videoPipe, audioPipe: audioPipe})
@@ -253,7 +283,8 @@ func (t *Transcoder) StartHLS(roomID, sessionID string, videoTrack, audioTrack *
 
 		close(startSignal) // Start both goroutines simultaneously
 
-		log.Printf("FFmpeg HLS transcoding started for room %s session %s (with audio)", roomID, sessionID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Bool("audio", true).Msg("ffmpeg hls transcoding started")
 	} else {
 		// Without audio: use stdin pipe for video only
 		args := []string{
@@ -271,8 +302,8 @@ func (t *Transcoder) StartHLS(roomID, sessionID string, videoTrack, audioTrack *
 			return "", fmt.Errorf("failed to get stdin pipe: %w", err)
 		}
 
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
+		cmd.Stderr = ffmpegLogWriter(roomID, sessionID)
+		cmd.Stdout = io.Discard
 
 		if err := cmd.Start(); err != nil {
 			return "", fmt.Errorf("failed to start ffmpeg: %w", err)
@@ -291,7 +322,8 @@ func (t *Transcoder) StartHLS(roomID, sessionID string, videoTrack, audioTrack *
 		// Start goroutine to write video frames to FFmpeg
 		go t.writeVideoToFFmpeg(roomID, videoTrack, stdinPipe, process.done)
 
-		log.Printf("FFmpeg HLS transcoding started for room %s session %s (video only)", roomID, sessionID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Bool("audio", false).Msg("ffmpeg hls transcoding started")
 	}
 
 	// Monitor FFmpeg process
@@ -305,7 +337,8 @@ func (t *Transcoder) StartHLS(roomID, sessionID string, videoTrack, audioTrack *
 		}
 		t.mu.Unlock()
 		close(process.done)
-		log.Printf("FFmpeg process ended for room %s session %s", roomID, sessionID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("ffmpeg process ended")
 	}()
 
 	// Return the HLS URL path (new format: /live/{roomID}/{sessionID}/...)
@@ -349,7 +382,8 @@ func (t *Transcoder) StopHLS(roomID, sessionID string) error {
 	// Cleanup named pipes
 	t.cleanupPipes(process)
 
-	log.Printf("FFmpeg stopped for room %s session %s", roomID, sessionID)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("ffmpeg stopped")
 	return nil
 }
 
@@ -371,8 +405,9 @@ func (t *Transcoder) CleanupSession(roomID, sessionID string) error {
 func (t *Transcoder) writeVideoToFFmpeg(roomID string, track *webrtc.TrackRemote, w io.WriteCloser, done chan struct{}) {
 	defer w.Close()
 
+	l := pkglog.L()
 	codec := track.Codec()
-	log.Printf("Video codec for room %s: %s", roomID, codec.MimeType)
+	l.Info().Str("room_id", roomID).Str("codec", codec.MimeType).Msg("video codec detected")
 
 	// Create IVF writer based on codec
 	switch codec.MimeType {
@@ -381,43 +416,45 @@ func (t *Transcoder) writeVideoToFFmpeg(roomID string, track *webrtc.TrackRemote
 	case webrtc.MimeTypeH264:
 		t.writeH264(roomID, track, w, done)
 	default:
-		log.Printf("Unsupported codec for room %s: %s", roomID, codec.MimeType)
+		l.Warn().Str("room_id", roomID).Str("codec", codec.MimeType).Msg("unsupported codec")
 	}
 }
 
 func (t *Transcoder) writeIVF(roomID string, track *webrtc.TrackRemote, w io.WriteCloser, done chan struct{}) {
+	l := pkglog.L()
 	ivf, err := ivfwriter.NewWith(w, ivfwriter.WithCodec(track.Codec().MimeType))
 	if err != nil {
-		log.Printf("Failed to create IVF writer for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to create ivf writer")
 		return
 	}
 	defer ivf.Close()
 
-	log.Printf("Writing video frames to FFmpeg for room %s...", roomID)
+	l.Info().Str("room_id", roomID).Msg("writing video frames to ffmpeg")
 
 	// Simple loop without select - ReadRTP will return error when connection closes
 	for {
 		rtpPacket, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("RTP read error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("rtp read error")
 			return
 		}
 
 		if err := ivf.WriteRTP(rtpPacket); err != nil {
-			log.Printf("IVF write error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("ivf write error")
 			return
 		}
 	}
 }
 
 func (t *Transcoder) writeH264(roomID string, track *webrtc.TrackRemote, w io.WriteCloser, done chan struct{}) {
+	l := pkglog.L()
 	depacketizer := &codecs.H264Packet{}
 
 	// Simple loop without select - ReadRTP will return error when connection closes
 	for {
 		rtpPacket, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("RTP read error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("rtp read error")
 			return
 		}
 
@@ -430,26 +467,27 @@ func (t *Transcoder) writeH264(roomID string, track *webrtc.TrackRemote, w io.Wr
 		// Write NAL unit with start code
 		startCode := []byte{0x00, 0x00, 0x00, 0x01}
 		if _, err := w.Write(startCode); err != nil {
-			log.Printf("Write error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("h264 write error")
 			return
 		}
 		if _, err := w.Write(payload); err != nil {
-			log.Printf("Write error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("h264 write error")
 			return
 		}
 	}
 }
 
 func (t *Transcoder) writeVideoToPipe(roomID string, track *webrtc.TrackRemote, pipePath string, done chan struct{}) {
+	l := pkglog.L()
 	f, err := os.OpenFile(pipePath, os.O_WRONLY, os.ModeNamedPipe)
 	if err != nil {
-		log.Printf("Failed to open video pipe for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to open video pipe")
 		return
 	}
 	defer f.Close()
 
 	codec := track.Codec()
-	log.Printf("Video codec for room %s: %s (via pipe)", roomID, codec.MimeType)
+	l.Info().Str("room_id", roomID).Str("codec", codec.MimeType).Msg("video codec detected (via pipe)")
 
 	switch codec.MimeType {
 	case webrtc.MimeTypeVP8, webrtc.MimeTypeVP9:
@@ -457,60 +495,62 @@ func (t *Transcoder) writeVideoToPipe(roomID string, track *webrtc.TrackRemote, 
 	case webrtc.MimeTypeH264:
 		t.writeH264(roomID, track, f, done)
 	default:
-		log.Printf("Unsupported codec for room %s: %s", roomID, codec.MimeType)
+		l.Warn().Str("room_id", roomID).Str("codec", codec.MimeType).Msg("unsupported codec")
 	}
 }
 
 func (t *Transcoder) writeIVFToPipe(roomID string, track *webrtc.TrackRemote, w io.WriteCloser, done chan struct{}) {
+	l := pkglog.L()
 	ivf, err := ivfwriter.NewWith(w, ivfwriter.WithCodec(track.Codec().MimeType))
 	if err != nil {
-		log.Printf("Failed to create IVF writer for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to create ivf writer")
 		return
 	}
 	defer ivf.Close()
 
-	log.Printf("Writing video frames to pipe for room %s...", roomID)
+	l.Info().Str("room_id", roomID).Msg("writing video frames to pipe")
 
 	for {
 		rtpPacket, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("Video RTP read error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("video rtp read error")
 			return
 		}
 
 		if err := ivf.WriteRTP(rtpPacket); err != nil {
-			log.Printf("Video IVF write error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("video ivf write error")
 			return
 		}
 	}
 }
 
 func (t *Transcoder) writeAudioToPipe(roomID string, track *webrtc.TrackRemote, pipePath string, done chan struct{}) {
+	l := pkglog.L()
 	f, err := os.OpenFile(pipePath, os.O_WRONLY, os.ModeNamedPipe)
 	if err != nil {
-		log.Printf("Failed to open audio pipe for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to open audio pipe")
 		return
 	}
 	defer f.Close()
 
 	ogg, err := oggwriter.NewWith(f, 48000, 2)
 	if err != nil {
-		log.Printf("Failed to create OGG writer for room %s: %v", roomID, err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to create ogg writer")
 		return
 	}
 	defer ogg.Close()
 
-	log.Printf("Writing audio frames to pipe for room %s...", roomID)
+	l.Info().Str("room_id", roomID).Msg("writing audio frames to pipe")
 
 	for {
 		rtpPacket, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("Audio RTP read error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("audio rtp read error")
 			return
 		}
 
 		if err := ogg.WriteRTP(rtpPacket); err != nil {
-			log.Printf("Audio OGG write error for room %s: %v", roomID, err)
+			l.Error().Err(err).Str("room_id", roomID).Msg("audio ogg write error")
 			return
 		}
 	}

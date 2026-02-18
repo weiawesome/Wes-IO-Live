@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/weiawesome/wes-io-live/media-service/internal/config"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 // ThumbnailService manages periodic thumbnail capture for live streams.
@@ -81,7 +81,8 @@ func (s *ThumbnailService) StartCapture(roomID, sessionID string) {
 	s.mu.Unlock()
 
 	go s.captureLoop(ctx, session)
-	log.Printf("Thumbnail capture started for room %s session %s (from HLS)", roomID, sessionID)
+	l := pkglog.L()
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("thumbnail capture started")
 }
 
 // StopCapture stops thumbnail capture for a room/session.
@@ -94,7 +95,8 @@ func (s *ThumbnailService) StopCapture(roomID, sessionID string) {
 	if session, exists := s.sessions[key]; exists {
 		session.cancel()
 		delete(s.sessions, key)
-		log.Printf("Thumbnail capture stopped for room %s session %s", roomID, sessionID)
+		l := pkglog.L()
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("thumbnail capture stopped")
 	}
 }
 
@@ -109,7 +111,8 @@ func (s *ThumbnailService) Stop() {
 	}
 	s.mu.Unlock()
 
-	log.Println("Thumbnail service stopped")
+	l := pkglog.L()
+	l.Info().Msg("thumbnail service stopped")
 }
 
 // captureLoop runs periodic thumbnail capture from HLS stream.
@@ -120,7 +123,8 @@ func (s *ThumbnailService) captureLoop(ctx context.Context, session *captureSess
 		initialDelay = 10 // Default 10 seconds
 	}
 
-	log.Printf("Waiting %d seconds before first thumbnail capture for room %s", initialDelay, session.roomID)
+	l := pkglog.L()
+	l.Info().Str("room_id", session.roomID).Int("delay_seconds", initialDelay).Msg("waiting before first thumbnail capture")
 
 	select {
 	case <-ctx.Done():
@@ -175,12 +179,13 @@ func (s *ThumbnailService) captureThumbnailFromHLS(ctx context.Context, session 
 	defer uploadCancel()
 
 	err = s.uploader.UploadReader(uploadCtx, bytes.NewReader(jpegData), int64(len(jpegData)), s3Key, "image/jpeg")
+	l := pkglog.L()
 	if err != nil {
-		log.Printf("Failed to upload thumbnail for room %s: %v", session.roomID, err)
+		l.Error().Err(err).Str("room_id", session.roomID).Msg("failed to upload thumbnail")
 		return false
 	}
 
-	log.Printf("Thumbnail uploaded for room %s session %s", session.roomID, session.sessionID)
+	l.Info().Str("room_id", session.roomID).Str("session_id", session.sessionID).Msg("thumbnail uploaded")
 	return true
 }
 

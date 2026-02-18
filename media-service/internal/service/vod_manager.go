@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/weiawesome/wes-io-live/media-service/internal/config"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/storage"
 )
 
@@ -82,7 +82,8 @@ func (m *VODManager) Start() {
 	if m.uploader != nil {
 		m.uploader.Start()
 	}
-	log.Println("VOD manager started")
+	l := pkglog.L()
+	l.Info().Msg("vod manager started")
 }
 
 // Stop stops the VOD manager.
@@ -97,7 +98,8 @@ func (m *VODManager) Stop() {
 		m.uploader.Stop()
 	}
 
-	log.Println("VOD manager stopped")
+	l := pkglog.L()
+	l.Info().Msg("vod manager stopped")
 }
 
 // sessionKey returns the key for playlistBuilders map
@@ -158,11 +160,12 @@ func (m *VODManager) StartRoom(ctx context.Context, roomID string) (*VODSession,
 
 	// Update state to live
 	session.State = SessionLive
+	l := pkglog.L()
 	if err := m.sessionStore.Save(ctx, session); err != nil {
-		log.Printf("Failed to update session state to live: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to update session state to live")
 	}
 
-	log.Printf("VOD tracking started for room %s (session: %s)", roomID, sessionID)
+	l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("vod tracking started")
 	return session, nil
 }
 
@@ -193,7 +196,8 @@ func (m *VODManager) onSegmentReady(roomID string, sessionID string, seg Segment
 			ContentType: "video/mp2t",
 			OnComplete: func(err error) {
 				if err != nil {
-					log.Printf("Failed to upload segment %s: %v", seg.Filename, err)
+					l := pkglog.L()
+					l.Error().Err(err).Str("segment", seg.Filename).Msg("failed to upload segment")
 					return
 				}
 
@@ -206,7 +210,8 @@ func (m *VODManager) onSegmentReady(roomID string, sessionID string, seg Segment
 		}
 
 		if err := m.uploader.Upload(task); err != nil {
-			log.Printf("Failed to queue segment upload: %v", err)
+			l := pkglog.L()
+			l.Error().Err(err).Str("room_id", roomID).Msg("failed to queue segment upload")
 		}
 	}
 }
@@ -233,13 +238,14 @@ func (m *VODManager) uploadVODPlaylist(roomID, sessionID string, finalized bool)
 	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 
+	l := pkglog.L()
 	if err := m.uploader.UploadReader(ctx, reader, int64(len(content)), s3Key, "application/vnd.apple.mpegurl"); err != nil {
-		log.Printf("Failed to upload VOD playlist for room %s session %s: %v", roomID, sessionID, err)
+		l.Error().Err(err).Str("room_id", roomID).Str("session_id", sessionID).Msg("failed to upload vod playlist")
 		return
 	}
 
 	if finalized {
-		log.Printf("Final VOD playlist uploaded for room %s session %s", roomID, sessionID)
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Msg("final vod playlist uploaded")
 	}
 }
 
@@ -264,10 +270,11 @@ func (m *VODManager) FinalizeRoom(ctx context.Context, roomID string) (string, e
 
 	sessionID := session.SessionID
 
+	l := pkglog.L()
 	// Update state to finalizing
 	session.State = SessionFinalizing
 	if err := m.sessionStore.Save(ctx, session); err != nil {
-		log.Printf("Failed to update session state to finalizing: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to update session state to finalizing")
 	}
 
 	// Stop watching
@@ -295,9 +302,9 @@ func (m *VODManager) FinalizeRoom(ctx context.Context, roomID string) (string, e
 
 	// Clean up local HLS files
 	if err := os.RemoveAll(session.LocalDir); err != nil {
-		log.Printf("Failed to cleanup local dir %s: %v", session.LocalDir, err)
+		l.Error().Err(err).Str("dir", session.LocalDir).Msg("failed to cleanup local dir")
 	} else {
-		log.Printf("Cleaned up local HLS files: %s", session.LocalDir)
+		l.Info().Str("dir", session.LocalDir).Msg("cleaned up local hls files")
 	}
 
 	// Try to remove parent room directory if empty
@@ -308,7 +315,7 @@ func (m *VODManager) FinalizeRoom(ctx context.Context, roomID string) (string, e
 
 	// Delete session from store
 	if err := m.sessionStore.Delete(ctx, roomID); err != nil {
-		log.Printf("Failed to delete session: %v", err)
+		l.Error().Err(err).Str("room_id", roomID).Msg("failed to delete session")
 	}
 
 	// Generate VOD URL
@@ -319,8 +326,7 @@ func (m *VODManager) FinalizeRoom(ctx context.Context, roomID string) (string, e
 			return "", fmt.Errorf("failed to get VOD URL: %w", err)
 		}
 
-		log.Printf("VOD finalized for room %s session %s: %s (segments: %d)",
-			roomID, sessionID, url, builder.SegmentCount())
+		l.Info().Str("room_id", roomID).Str("session_id", sessionID).Str("url", url).Int("segments", builder.SegmentCount()).Msg("vod finalized")
 		return url, nil
 	}
 
@@ -447,7 +453,8 @@ func (m *VODManager) ListRoomVODs(ctx context.Context, roomID string) ([]VODInfo
 		s3Key := fmt.Sprintf("vod/room_%s/%s/stream.m3u8", roomID, sessionID)
 		url, err := m.s3Storage.GetURL(ctx, s3Key, 24*time.Hour)
 		if err != nil {
-			log.Printf("Failed to get URL for session %s: %v", sessionID, err)
+			l := pkglog.L()
+			l.Error().Err(err).Str("session_id", sessionID).Msg("failed to get url for session")
 			continue
 		}
 
