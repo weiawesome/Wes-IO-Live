@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/client"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/config"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/handler"
@@ -26,10 +26,15 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		l := pkglog.L()
+		l.Fatal().Err(err).Msg("failed to load configuration")
 	}
 
-	log.Printf("Starting presence service on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	// Initialize structured logger
+	pkglog.Init(pkglog.Config{Level: cfg.Log.Level, ServiceName: "presence-service"})
+	logger := pkglog.L()
+
+	logger.Info().Str("host", cfg.Server.Host).Int("port", cfg.Server.Port).Msg("starting presence-service")
 
 	// Create Redis store (used for presence data + Publish)
 	redisStore, err := store.NewRedisStore(store.RedisConfig{
@@ -40,7 +45,7 @@ func main() {
 		InstanceID:    cfg.Server.InstanceID,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create Redis store: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create redis store")
 	}
 	defer redisStore.Close()
 
@@ -55,7 +60,7 @@ func main() {
 	// Create auth client
 	authClient, err := client.NewAuthClient(cfg.Auth.GRPCAddress)
 	if err != nil {
-		log.Fatalf("Failed to create auth client: %v", err)
+		logger.Fatal().Err(err).Msg("failed to create auth client")
 	}
 	defer authClient.Close()
 
@@ -81,7 +86,7 @@ func main() {
 	defer cancel()
 
 	if err := svc.Start(ctx); err != nil {
-		log.Fatalf("Failed to start presence service: %v", err)
+		logger.Fatal().Err(err).Msg("failed to start presence service")
 	}
 
 	// Start Redis Pub/Sub subscriber for multi-instance count sync
@@ -96,13 +101,13 @@ func main() {
 		svc, // service implements BroadcastEventHandler
 	)
 	if err != nil {
-		log.Printf("Warning: Failed to create Kafka consumer: %v (live room tracking disabled)", err)
+		logger.Warn().Err(err).Msg("failed to create kafka consumer, live room tracking disabled")
 	} else {
 		if err := kafkaConsumer.Start(ctx); err != nil {
-			log.Printf("Warning: Failed to start Kafka consumer: %v", err)
+			logger.Warn().Err(err).Msg("failed to start kafka consumer")
 		} else {
 			defer kafkaConsumer.Close()
-			log.Printf("Kafka consumer started, subscribed to topic: %s", cfg.Kafka.Topic)
+			logger.Info().Str("topic", cfg.Kafka.Topic).Msg("kafka consumer started")
 		}
 	}
 
@@ -126,7 +131,7 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      router,
+		Handler:      pkglog.HTTPMiddleware(logger)(router),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -134,9 +139,9 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Presence service listening on %s", addr)
+		logger.Info().Str("addr", addr).Msg("presence-service listening")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			logger.Fatal().Err(err).Msg("server error")
 		}
 	}()
 
@@ -145,7 +150,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down presence service...")
+	logger.Info().Msg("shutting down presence-service")
 
 	// Stop service
 	svc.Stop()
@@ -155,8 +160,8 @@ func main() {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		logger.Error().Err(err).Msg("server shutdown error")
 	}
 
-	log.Println("Presence service stopped")
+	logger.Info().Msg("presence-service stopped")
 }

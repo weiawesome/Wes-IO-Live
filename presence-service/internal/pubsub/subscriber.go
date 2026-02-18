@@ -3,10 +3,10 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/presence-service/internal/hub"
 )
@@ -35,13 +35,15 @@ func NewSubscriber(client *redis.Client, channel string, h *hub.Hub, instanceID 
 // Run subscribes to the channel and broadcasts count updates to local hub until ctx is done.
 // Reconnects on receive errors.
 func (s *Subscriber) Run(ctx context.Context) {
+	l := pkglog.L()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			if err := s.runSubscription(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("Presence pubsub subscription error: %v; reconnecting in 2s", err)
+				l.Warn().Err(err).Msg("presence pubsub subscription error, reconnecting in 2s")
 				select {
 				case <-ctx.Done():
 					return
@@ -79,9 +81,11 @@ func (s *Subscriber) runSubscription(ctx context.Context) error {
 }
 
 func (s *Subscriber) handleMessage(ctx context.Context, payload string) {
+	l := pkglog.L()
+
 	var update domain.RoomUpdatePayload
 	if err := json.Unmarshal([]byte(payload), &update); err != nil {
-		log.Printf("Presence pubsub: invalid payload: %v", err)
+		l.Warn().Err(err).Msg("presence pubsub: invalid payload")
 		return
 	}
 	if update.RoomID == "" {
@@ -94,6 +98,6 @@ func (s *Subscriber) handleMessage(ctx context.Context, payload string) {
 		Count:  update.Count,
 	}
 	if err := s.hub.BroadcastToRoom(update.RoomID, msg, ""); err != nil {
-		log.Printf("Presence pubsub: broadcast error for room %s: %v", update.RoomID, err)
+		l.Error().Err(err).Str("room_id", update.RoomID).Msg("presence pubsub: broadcast error")
 	}
 }
