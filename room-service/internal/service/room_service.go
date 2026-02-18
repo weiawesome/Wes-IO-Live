@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/weiawesome/wes-io-live/pkg/log"
+	"github.com/weiawesome/wes-io-live/room-service/internal/audit"
 	"github.com/weiawesome/wes-io-live/room-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/room-service/internal/repository"
 )
@@ -30,9 +32,12 @@ func NewRoomService(repo repository.RoomRepository, maxRoomsPerUser int) RoomSer
 
 // CreateRoom creates a new room.
 func (s *roomServiceImpl) CreateRoom(ctx context.Context, userID, username string, req *domain.CreateRoomRequest) (*domain.RoomResponse, error) {
+	l := log.Ctx(ctx)
+
 	// Check if user has reached max rooms limit
 	activeCount, err := s.repo.CountActiveRoomsByUser(ctx, userID)
 	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to count active rooms")
 		return nil, err
 	}
 
@@ -51,8 +56,11 @@ func (s *roomServiceImpl) CreateRoom(ctx context.Context, userID, username strin
 	}
 
 	if err := s.repo.Create(ctx, room); err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to create room")
 		return nil, err
 	}
+
+	audit.Log(ctx, audit.ActionCreateRoom, userID, "room created")
 
 	resp := room.ToResponse()
 	return &resp, nil
@@ -60,11 +68,14 @@ func (s *roomServiceImpl) CreateRoom(ctx context.Context, userID, username strin
 
 // GetRoom retrieves a room by ID.
 func (s *roomServiceImpl) GetRoom(ctx context.Context, roomID string) (*domain.RoomResponse, error) {
+	l := log.Ctx(ctx)
+
 	room, err := s.repo.GetByID(ctx, roomID)
 	if err != nil {
 		if errors.Is(err, repository.ErrRoomNotFound) {
 			return nil, ErrRoomNotFound
 		}
+		l.Error().Err(err).Str(audit.FieldRoomID, roomID).Msg("failed to get room")
 		return nil, err
 	}
 
@@ -74,6 +85,8 @@ func (s *roomServiceImpl) GetRoom(ctx context.Context, roomID string) (*domain.R
 
 // ListRooms lists rooms with pagination.
 func (s *roomServiceImpl) ListRooms(ctx context.Context, page, pageSize int, status string) (*domain.ListRoomsResponse, error) {
+	l := log.Ctx(ctx)
+
 	if page < 1 {
 		page = 1
 	}
@@ -88,6 +101,7 @@ func (s *roomServiceImpl) ListRooms(ctx context.Context, page, pageSize int, sta
 
 	rooms, total, err := s.repo.List(ctx, page, pageSize, status)
 	if err != nil {
+		l.Error().Err(err).Msg("failed to list rooms")
 		return nil, err
 	}
 
@@ -109,6 +123,8 @@ func (s *roomServiceImpl) ListRooms(ctx context.Context, page, pageSize int, sta
 
 // SearchRooms searches rooms by query.
 func (s *roomServiceImpl) SearchRooms(ctx context.Context, query string, page, pageSize int) (*domain.ListRoomsResponse, error) {
+	l := log.Ctx(ctx)
+
 	if page < 1 {
 		page = 1
 	}
@@ -118,6 +134,7 @@ func (s *roomServiceImpl) SearchRooms(ctx context.Context, query string, page, p
 
 	rooms, total, err := s.repo.Search(ctx, query, page, pageSize)
 	if err != nil {
+		l.Error().Err(err).Msg("failed to search rooms")
 		return nil, err
 	}
 
@@ -139,8 +156,11 @@ func (s *roomServiceImpl) SearchRooms(ctx context.Context, query string, page, p
 
 // GetMyRooms retrieves rooms owned by a user.
 func (s *roomServiceImpl) GetMyRooms(ctx context.Context, userID string) ([]domain.RoomResponse, error) {
+	l := log.Ctx(ctx)
+
 	rooms, err := s.repo.GetUserRooms(ctx, userID)
 	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to get user rooms")
 		return nil, err
 	}
 
@@ -154,12 +174,15 @@ func (s *roomServiceImpl) GetMyRooms(ctx context.Context, userID string) ([]doma
 
 // CloseRoom closes a room.
 func (s *roomServiceImpl) CloseRoom(ctx context.Context, userID, roomID string) error {
+	l := log.Ctx(ctx)
+
 	// Verify ownership
 	room, err := s.repo.GetByID(ctx, roomID)
 	if err != nil {
 		if errors.Is(err, repository.ErrRoomNotFound) {
 			return ErrRoomNotFound
 		}
+		l.Error().Err(err).Str(audit.FieldRoomID, roomID).Msg("failed to get room for close")
 		return err
 	}
 
@@ -167,13 +190,23 @@ func (s *roomServiceImpl) CloseRoom(ctx context.Context, userID, roomID string) 
 		return ErrNotRoomOwner
 	}
 
-	return s.repo.Close(ctx, roomID)
+	if err := s.repo.Close(ctx, roomID); err != nil {
+		l.Error().Err(err).Str(audit.FieldRoomID, roomID).Msg("failed to close room")
+		return err
+	}
+
+	audit.Log(ctx, audit.ActionCloseRoom, userID, "room closed")
+
+	return nil
 }
 
 // GetRoomStats returns room statistics for a user.
 func (s *roomServiceImpl) GetRoomStats(ctx context.Context, userID string) (activeCount, maxAllowed int, err error) {
+	l := log.Ctx(ctx)
+
 	activeCount, err = s.repo.CountActiveRoomsByUser(ctx, userID)
 	if err != nil {
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to get room stats")
 		return 0, 0, err
 	}
 	return activeCount, s.maxRoomsPerUser, nil
