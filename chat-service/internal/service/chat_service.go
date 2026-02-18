@@ -3,14 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/weiawesome/wes-io-live/chat-service/internal/audit"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/client"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/hub"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/kafka"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/registry"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type chatService struct {
@@ -49,6 +50,7 @@ func (s *chatService) HandleAuth(ctx context.Context, c *hub.Client, token strin
 	}
 
 	if !result.Valid {
+		audit.LogWithDetail(ctx, audit.ActionAuthFailed, "", result.Error, "auth failed: invalid token")
 		c.SendMessage(&domain.AuthResultMessage{
 			Type:    domain.MsgTypeAuthResult,
 			Success: false,
@@ -58,6 +60,7 @@ func (s *chatService) HandleAuth(ctx context.Context, c *hub.Client, token strin
 	}
 
 	c.Session.Authenticate(result.UserID, result.Username, result.Email, result.Roles)
+	audit.Log(ctx, audit.ActionAuth, result.UserID, "user authenticated")
 
 	return c.SendMessage(&domain.AuthResultMessage{
 		Type:     domain.MsgTypeAuthResult,
@@ -83,8 +86,11 @@ func (s *chatService) HandleJoinRoom(ctx context.Context, c *hub.Client, roomID,
 
 	// Register in Redis
 	if err := s.registry.Register(ctx, roomID, sessionID); err != nil {
-		log.Printf("Failed to register room-session in registry: %v", err)
+		l := log.Ctx(ctx)
+		l.Error().Err(err).Msg("failed to register room-session in registry")
 	}
+
+	audit.LogWithDetail(ctx, audit.ActionJoinRoom, c.Session.GetUserID(), fmt.Sprintf("%s:%s", roomID, sessionID), "joined room")
 
 	return c.SendMessage(&domain.RoomJoinedMessage{
 		Type:      domain.MsgTypeRoomJoined,
@@ -107,7 +113,8 @@ func (s *chatService) HandleChatMessage(ctx context.Context, c *hub.Client, cont
 	// Generate Snowflake ID via id-service
 	msgID, err := s.idClient.GenerateID(ctx)
 	if err != nil {
-		log.Printf("Failed to generate message ID: %v", err)
+		l := log.Ctx(ctx)
+		l.Error().Err(err).Msg("failed to generate message id")
 		return c.SendMessage(domain.NewErrorMessage(domain.ErrCodeInternalError, "Failed to generate message ID"))
 	}
 
@@ -123,9 +130,12 @@ func (s *chatService) HandleChatMessage(ctx context.Context, c *hub.Client, cont
 
 	// Produce to Kafka only; delivery back to WS clients happens via downstream gRPC
 	if err := s.producer.ProduceMessage(ctx, msg); err != nil {
-		log.Printf("Failed to produce chat message: %v", err)
+		l := log.Ctx(ctx)
+		l.Error().Err(err).Msg("failed to produce chat message")
 		return c.SendMessage(domain.NewErrorMessage(domain.ErrCodeInternalError, "Failed to send message"))
 	}
+
+	audit.Log(ctx, audit.ActionSendMessage, c.Session.GetUserID(), "message sent")
 
 	return nil
 }
@@ -134,13 +144,18 @@ func (s *chatService) HandleLeaveRoom(ctx context.Context, c *hub.Client) error 
 	if !c.Session.IsInRoom() {
 		return nil
 	}
-	return s.handleLeaveInternal(ctx, c)
+	if err := s.handleLeaveInternal(ctx, c); err != nil {
+		return err
+	}
+	audit.Log(ctx, audit.ActionLeaveRoom, c.Session.GetUserID(), "left room")
+	return nil
 }
 
 func (s *chatService) HandleDisconnect(ctx context.Context, c *hub.Client) error {
 	if !c.Session.IsInRoom() {
 		return nil
 	}
+	audit.Log(ctx, audit.ActionDisconnect, c.Session.GetUserID(), "disconnected")
 	return s.handleLeaveInternal(ctx, c)
 }
 
@@ -157,7 +172,8 @@ func (s *chatService) handleLeaveInternal(ctx context.Context, c *hub.Client) er
 	count := s.hub.GetRoomSessionClientCount(roomID, sessionID)
 	if count == 0 {
 		if err := s.registry.Deregister(ctx, roomID, sessionID); err != nil {
-			log.Printf("Failed to deregister room-session: %v", err)
+			l := log.Ctx(ctx)
+			l.Error().Err(err).Msg("failed to deregister room-session")
 		}
 	}
 
@@ -168,14 +184,16 @@ func (s *chatService) Start(ctx context.Context) error {
 	if err := s.registry.StartHeartbeat(ctx); err != nil {
 		return fmt.Errorf("failed to start registry heartbeat: %w", err)
 	}
-	log.Println("Chat service started")
+	l := log.L()
+	l.Info().Msg("chat service started")
 	return nil
 }
 
 func (s *chatService) Stop() error {
 	s.registry.StopHeartbeat()
 	if err := s.producer.Close(); err != nil {
-		log.Printf("Failed to close kafka producer: %v", err)
+		l := log.L()
+		l.Error().Err(err).Msg("failed to close kafka producer")
 	}
 	return nil
 }
