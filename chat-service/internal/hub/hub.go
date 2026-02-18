@@ -3,10 +3,10 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/weiawesome/wes-io-live/chat-service/internal/config"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type Hub struct {
@@ -48,7 +48,8 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client.ID] = client
 			h.mu.Unlock()
-			log.Printf("Client registered: %s", client.ID)
+			l := log.L()
+			l.Debug().Str("client_id", client.ID).Msg("client registered")
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -63,7 +64,8 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("Client unregistered: %s", client.ID)
+			l := log.L()
+			l.Debug().Str("client_id", client.ID).Msg("client unregistered")
 
 		case msg := <-h.broadcast:
 			key := roomSessionKey(msg.RoomID, msg.SessionID)
@@ -102,7 +104,8 @@ func (h *Hub) JoinRoomSession(client *Client, roomID, sessionID string) {
 		h.roomSessions[key] = make(map[string]*Client)
 	}
 	h.roomSessions[key][client.ID] = client
-	log.Printf("Client %s joined room-session %s", client.ID, key)
+	l := log.L()
+	l.Info().Str("client_id", client.ID).Str("room_session", key).Msg("client joined room-session")
 }
 
 func (h *Hub) LeaveRoomSession(client *Client, roomID, sessionID string) {
@@ -116,7 +119,8 @@ func (h *Hub) LeaveRoomSession(client *Client, roomID, sessionID string) {
 			delete(h.roomSessions, key)
 		}
 	}
-	log.Printf("Client %s left room-session %s:%s", client.ID, roomID, sessionID)
+	l := log.L()
+	l.Info().Str("client_id", client.ID).Str("room_id", roomID).Str("session_id", sessionID).Msg("client left room-session")
 }
 
 func (h *Hub) BroadcastToRoomSession(roomID, sessionID string, message interface{}, exclude string) error {

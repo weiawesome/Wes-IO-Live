@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/weiawesome/wes-io-live/chat-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/hub"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/service"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 var upgrader = websocket.Upgrader{
@@ -39,7 +39,8 @@ func NewWSHandler(h *hub.Hub, svc service.ChatService, wsCfg config.WebSocketCon
 func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		l := log.L()
+		l.Error().Err(err).Msg("websocket upgrade failed")
 		return
 	}
 
@@ -68,7 +69,8 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleAuth(ctx, client, msg.Token); err != nil {
-			log.Printf("Auth failed for client %s: %v", client.ID, err)
+			l := log.L()
+			l.Warn().Str("client_id", client.ID).Err(err).Msg("auth failed")
 		}
 
 	case domain.MsgTypeJoinRoom:
@@ -78,7 +80,8 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleJoinRoom(ctx, client, msg.RoomID, msg.SessionID); err != nil {
-			log.Printf("Join room failed for client %s: %v", client.ID, err)
+			l := log.L()
+			l.Error().Str("client_id", client.ID).Err(err).Msg("join room failed")
 		}
 
 	case domain.MsgTypeChatMessage:
@@ -88,12 +91,14 @@ func (h *WSHandler) handleMessage(client *hub.Client, message []byte) {
 			return
 		}
 		if err := h.service.HandleChatMessage(ctx, client, msg.Content); err != nil {
-			log.Printf("Chat message failed for client %s: %v", client.ID, err)
+			l := log.L()
+			l.Error().Str("client_id", client.ID).Err(err).Msg("chat message failed")
 		}
 
 	case domain.MsgTypeLeaveRoom:
 		if err := h.service.HandleLeaveRoom(ctx, client); err != nil {
-			log.Printf("Leave room failed for client %s: %v", client.ID, err)
+			l := log.L()
+			l.Error().Str("client_id", client.ID).Err(err).Msg("leave room failed")
 		}
 
 	case domain.MsgTypePing:

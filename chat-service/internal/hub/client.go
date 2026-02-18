@@ -2,12 +2,12 @@ package hub
 
 import (
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/config"
 	"github.com/weiawesome/wes-io-live/chat-service/internal/domain"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 type Client struct {
@@ -47,7 +47,8 @@ func (c *Client) ReadPump(handler func(*Client, []byte)) {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+				l := log.L()
+				l.Warn().Err(err).Str("client_id", c.ID).Msg("websocket unexpected close")
 			}
 			break
 		}
