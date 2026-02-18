@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/cassandra"
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/config"
 	"github.com/weiawesome/wes-io-live/chat-persist-service/internal/domain"
+	"github.com/weiawesome/wes-io-live/pkg/log"
 )
 
 // Consumer consumes messages from Kafka and persists them to Cassandra.
@@ -52,12 +52,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", c.topic, err)
 	}
 
-	log.Printf("Kafka consumer started (topic: %s, group: %s)", c.topic, c.groupID)
+	l := log.L()
+	l.Info().Str("topic", c.topic).Str("group", c.groupID).Msg("kafka consumer started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Kafka consumer stopping...")
+			l.Info().Msg("kafka consumer stopping")
 			return nil
 		default:
 		}
@@ -70,11 +71,19 @@ func (c *Consumer) Run(ctx context.Context) error {
 		switch e := ev.(type) {
 		case *kafka.Message:
 			if err := c.handleMessage(ctx, e.Value); err != nil {
-				log.Printf("HandleMessage error (partition=%d offset=%v): %v",
-					e.TopicPartition.Partition, e.TopicPartition.Offset, err)
+				cl := log.Ctx(ctx)
+				cl.Error().
+					Int32("partition", e.TopicPartition.Partition).
+					Str("offset", e.TopicPartition.Offset.String()).
+					Err(err).
+					Msg("handle message error")
 			}
 		case kafka.Error:
-			log.Printf("Kafka error: %v (code=%d fatal=%v)", e, e.Code(), e.IsFatal())
+			l.Error().
+				Int("code", int(e.Code())).
+				Bool("fatal", e.IsFatal()).
+				Err(e).
+				Msg("kafka error")
 			if e.IsFatal() {
 				return fmt.Errorf("fatal kafka error: %w", e)
 			}
@@ -97,14 +106,19 @@ func (c *Consumer) handleMessage(ctx context.Context, value []byte) error {
 		return fmt.Errorf("failed to persist message: %w", err)
 	}
 
-	log.Printf("Persisted message: room=%s session=%s message_id=%s",
-		msg.RoomID, msg.SessionID, msg.MessageID)
+	cl := log.Ctx(ctx)
+	cl.Info().
+		Str("room_id", msg.RoomID).
+		Str("session_id", msg.SessionID).
+		Str("message_id", msg.MessageID).
+		Msg("message persisted")
 
 	return nil
 }
 
 // Close closes the Kafka consumer.
 func (c *Consumer) Close() error {
-	log.Println("Closing Kafka consumer...")
+	l := log.L()
+	l.Info().Msg("closing kafka consumer")
 	return c.consumer.Close()
 }
