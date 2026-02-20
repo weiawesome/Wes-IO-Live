@@ -26,8 +26,10 @@ services:
 
     volumes:
       - cassandra_data:/var/lib/cassandra
+
   kafka:
     image: docker.io/confluentinc/cp-kafka:7.7.7
+    container_name: kafka
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
@@ -62,14 +64,25 @@ services:
       - kafka_secrets:/etc/kafka/secrets
       
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18
+    container_name: postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     ports:
       - "5432:5432"
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=4"
+      - "-c"
+      - "max_wal_senders=4"
+      - "-c"
+      - "wal_keep_size=1GB"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -78,6 +91,7 @@ services:
 
   redis:
     image: redis:8.4.0-alpine
+    container_name: redis
     ports:
       - "6379:6379"
     volumes:
@@ -90,11 +104,15 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_DEFAULT_BUCKETS: ${S3_BUCKET:-vod}:public
+      MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
+      MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: ${KAFKA_BROKERS:-kafka:29092}
+      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: ${MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY:-minio-events}
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # MinIO Console
@@ -108,6 +126,7 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.11
+    container_name: elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -124,6 +143,7 @@ services:
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.19.11
+    container_name: kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
@@ -140,6 +160,7 @@ services:
 
   fluent-bit:
     image: fluent/fluent-bit:4.2.2
+    container_name: fluent-bit
     ports:
       - "24224:24224"
       - "2020:2020"
@@ -155,10 +176,59 @@ services:
     depends_on:
       - elasticsearch
 
+  connect-pg-kafka:
+    image: quay.io/debezium/connect:3.4.1
+    container_name: connect-pg-kafka
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:29092
+      - CONNECT_BOOTSTRAP_SERVERS=kafka:29092
+      - CONNECT_GROUP_ID=connect-cluster-pg-kafka
+      - CONFIG_STORAGE_TOPIC=connect-configs-pg-kafka
+      - OFFSET_STORAGE_TOPIC=connect-offsets-pg-kafka
+      - STATUS_STORAGE_TOPIC=connect-status-pg-kafka
+      - GROUP_ID=pg-kafka
+      - KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - VALUE_CONVERTER_SCHEMAS_ENABLE=false
+    ports:
+      - "9083:8083"
+    volumes:
+      - connect_pg_kafka_data:/kafka/data
+      - connect_pg_kafka_logs:/kafka/logs
+      - connect_pg_kafka_config:/kafka/config
+
+  connect-kafka-es:
+    build:
+      context: .
+      dockerfile: connect/kafka-es/Dockerfile
+    container_name: connect-kafka-es
+    environment:
+      - CONNECT_BOOTSTRAP_SERVERS=kafka:29092
+      - CONNECT_REST_HOST_NAME=0.0.0.0
+      - CONNECT_REST_ADVERTISED_HOST_NAME=connect-kafka-es
+      - CONNECT_REST_PORT=8083
+      - CONNECT_GROUP_ID=connect-cluster-kafka-es
+      - CONNECT_CONFIG_STORAGE_TOPIC=connect-configs-kafka-es 
+      - CONNECT_OFFSET_STORAGE_TOPIC=connect-offsets-kafka-es
+      - CONNECT_STATUS_STORAGE_TOPIC=connect-status-kafka-es
+      - CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_INTERNAL_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_INTERNAL_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_PLUGIN_PATH=/usr/share/java,/usr/share/confluent-hub-components
+    ports:
+      - "9084:8083"
+    volumes:
+      - connect_kafka_es_jars:/etc/kafka-connect/jars
+      - connect_kafka_es_secrets:/etc/kafka-connect/secrets
+      - connect_kafka_es_kafka_secrets:/etc/kafka/secrets
+      - connect_kafka_es_data:/var/lib/kafka/data
+
   auth-service:
     build:
       context: .
       dockerfile: auth-service/Dockerfile
+    container_name: auth-service
     environment:
       - GRPC_PORT=${GRPC_PORT:-50051}
       - JWT_ACCESS_DURATION=${JWT_ACCESS_DURATION:-15m}
@@ -183,6 +253,7 @@ services:
     build:
       context: .
       dockerfile: user-service/Dockerfile
+    container_name: user-service
     environment:
       - PORT=8082
       - DB_HOST=${DB_HOST:-postgres}
@@ -192,6 +263,8 @@ services:
       - DB_NAME=postgres
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - AUTH_SERVICE_GRPC=${AUTH_SERVICE_GRPC:-auth-service:50051}
+      - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - GIN_MODE=${GIN_MODE:-release}
     ports:
       - "8082:8082"
@@ -199,6 +272,8 @@ services:
       auth-service:
         condition: service_started
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       fluent-bit:
         condition: service_healthy
@@ -217,6 +292,7 @@ services:
     build:
       context: .
       dockerfile: room-service/Dockerfile
+    container_name: room-service
     environment:
       - PORT=8083
       - DB_HOST=${DB_HOST:-postgres}
@@ -226,6 +302,8 @@ services:
       - DB_NAME=postgres
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - AUTH_SERVICE_GRPC=${AUTH_SERVICE_GRPC:-auth-service:50051}
+      - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - MAX_ROOMS_PER_USER=${MAX_ROOMS_PER_USER:-3}
       - GIN_MODE=${GIN_MODE:-release}
     ports:
@@ -234,6 +312,8 @@ services:
       auth-service:
         condition: service_started
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       fluent-bit:
         condition: service_healthy
@@ -248,10 +328,44 @@ services:
         fluentd-address: 127.0.0.1:24224
         tag: app.room-service
 
+  search-service:
+    build:
+      context: .
+      dockerfile: search-service/Dockerfile
+    container_name: search-service
+    environment:
+      - PORT=8094
+      - ES_ADDRESSES=http://elasticsearch:9200
+      - ES_INDEX_USERS=cdc-public-users
+      - ES_INDEX_ROOMS=cdc-public-rooms
+      - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - GIN_MODE=${GIN_MODE:-release}
+    ports:
+      - "8094:8094"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8094 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: app.search-service
+
   signal-service:
     build:
       context: .
       dockerfile: signal-service/Dockerfile
+    container_name: signal-service
     environment:
       - PORT=8084
       - AUTH_GRPC_ADDRESS=${AUTH_SERVICE_GRPC:-auth-service:50051}
@@ -286,6 +400,7 @@ services:
     build:
       context: .
       dockerfile: media-service/Dockerfile
+    container_name: media-service
     environment:
       - PORT=8085
       - REDIS_ADDRESS=${REDIS_ADDRESS:-redis:6379}
@@ -328,6 +443,7 @@ services:
     build:
       context: .
       dockerfile: ice-service/Dockerfile
+    container_name: ice-service
     environment:
       - PORT=8086
       - CF_TURN_ID=${CF_TURN_ID:-}
@@ -348,10 +464,12 @@ services:
       options:
         fluentd-address: 127.0.0.1:24224
         tag: app.ice-service
+
   playback-service:
     build:
       context: .
       dockerfile: playback-service/Dockerfile
+    container_name: playback-service
     environment:
       - PORT=8087
       - STORAGE_TYPE=${PLAYBACK_STORAGE_TYPE:-s3}
@@ -385,10 +503,12 @@ services:
       options:
         fluentd-address: 127.0.0.1:24224
         tag: app.playback-service
+  
   presence-service:
     build:
       context: .
       dockerfile: presence-service/Dockerfile
+    container_name: presence-service
     environment:
       - PORT=8092
       - AUTH_GRPC_ADDRESS=${AUTH_SERVICE_GRPC:-auth-service:50051}
@@ -422,6 +542,7 @@ services:
     build:
       context: .
       dockerfile: chat-service/Dockerfile
+    container_name: chat-service
     environment:
       - PORT=8088
       - GRPC_PORT=50052
@@ -461,6 +582,7 @@ services:
     build:
       context: .
       dockerfile: chat-dispatcher/Dockerfile
+    container_name: chat-dispatcher
     environment:
       - PORT=8089
       - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:29092}
@@ -493,6 +615,7 @@ services:
     build:
       context: .
       dockerfile: chat-history-service/Dockerfile
+    container_name: chat-history-service
     environment:
       - PORT=8091
       - CASSANDRA_HOSTS=${CASSANDRA_HOSTS:-cassandra:9042}
@@ -523,6 +646,7 @@ services:
     build:
       context: .
       dockerfile: chat-persist-service/Dockerfile
+    container_name: chat-persist-service
     environment:
       - PORT=8093
       - CASSANDRA_HOSTS=${CASSANDRA_HOSTS:-cassandra:9042}
@@ -554,6 +678,7 @@ services:
     build:
       context: .
       dockerfile: id-service/Dockerfile
+    container_name: id-service
     environment:
       - PORT=8090
       - GRPC_PORT=50053
@@ -577,6 +702,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    container_name: nginx
     ports:
       - "8080:80"
     volumes:
@@ -599,3 +725,10 @@ volumes:
   kafka_data:
   kafka_secrets:
   elasticsearch-data:
+  connect_pg_kafka_data:
+  connect_pg_kafka_logs:
+  connect_pg_kafka_config:
+  connect_kafka_es_jars:
+  connect_kafka_es_secrets:
+  connect_kafka_es_kafka_secrets:
+  connect_kafka_es_data:

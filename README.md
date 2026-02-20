@@ -33,6 +33,7 @@
 | **Real-time Chat**    | WebSocket chat + Kafka + Cassandra message persistence |
 | **STUN/TURN**         | ICE service for NAT traversal/relay, handles complex network scenarios |
 | **Monitoring**        | Elasticsearch, Fluentd, Kibana |
+| **Search**            | CDC + Elasticsearch |
 
 ---
 
@@ -89,6 +90,82 @@ docker-compose up -d
    Or enter the container and manually paste/run the content of [001_create_tables.cql](chat-persist-service/migrations/001_create_tables.cql) in `cqlsh` to create the `wes_chat` keyspace and `messages_by_room_session` table:
    ```bash
    docker exec -it cassandra cqlsh
+   ```
+
+   Start the services that depend on Cassandra:
+   ```bash
+   docker-compose up -d chat-history-service chat-persist-service
+   ```
+3. **CDC: Create Kafka Topics and Connectors**
+   1. Create Topics in kafka (Source)
+   ```bash
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-configs-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-offsets-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-status-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+   ```
+   2. Create CDC connectors (Source)
+   ```shell
+   # Start connect-pg-kafka container
+   docker-compose up -d connect-pg-kafka
+
+   # Create CDC connector (users)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/pg-kafka/source_users.json http://localhost:9083/connectors
+
+   # Create CDC connector (rooms)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/pg-kafka/source_rooms.json http://localhost:9083/connectors
+   ```
+   3. Create Topics in kafka (Sink)
+   ```shell
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-configs-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-offsets-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-status-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic dlq-users \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic dlq-rooms \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+   ```
+   4. Create CDC connectors (Sink)
+   ```shell
+   # Start connect-kafka-es container
+   docker-compose up -d connect-kafka-es
+
+   # Create CDC connector (users)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/kafka-es/sink_users.json http://localhost:9084/connectors
+
+   # Create CDC connector (rooms)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/kafka-es/sink_rooms.json http://localhost:9084/connectors
    ```
 
 - **Home:** http://localhost:8080  
