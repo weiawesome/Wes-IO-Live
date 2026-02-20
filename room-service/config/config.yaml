@@ -18,6 +18,15 @@ database:
 auth_service:
   grpc_address: "localhost:50051"
 
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+
+cache:
+  prefix: "room"
+  ttl: "30s"
+
 room:
   max_rooms_per_user: 3
 
