@@ -16,6 +16,7 @@ use (
 	./proto/chat
 	./proto/id
 	./room-service
+	./search-service
 	./signal-service
 	./user-service
 )

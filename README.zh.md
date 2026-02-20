@@ -33,6 +33,7 @@
 | **即時聊天** | WebSocket 聊天 + Kafka + Cassandra 歷史存儲 |
 | **STUN/TURN** | ICE 服務提供穿透與中繼，適配複雜網路環境 |
 | **監控** | Elasticsearch、Fluentd、Kibana |
+| **搜索** | CDC + Elasticsearch |
 
 ---
 
@@ -89,6 +90,83 @@ docker-compose up -d
    或進入容器後在 `cqlsh` 中手動貼上並執行 [001_create_tables.cql](chat-persist-service/migrations/001_create_tables.cql) 的內容（建立 `wes_chat` keyspace 與 `messages_by_room_session` 表）：
    ```bash
    docker exec -it cassandra cqlsh
+   ```
+
+   啟動依賴 Cassandra 的服務：
+   ```bash
+   docker-compose up -d chat-history-service chat-persist-service
+   ```
+
+3. **CDC：建立 Kafka Topics 與連接器**
+   1. 建立 Topics in kafka (Source)
+   ```bash
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-configs-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-offsets-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-status-pg-kafka \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+   ```
+   2. 建立 CDC 連接器 (Source)
+   ```shell
+   # 啟動 connect-pg-kafka 容器
+   docker-compose up -d connect-pg-kafka
+
+   # 建立 CDC 連接器 (users)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/pg-kafka/source_users.json http://localhost:9083/connectors
+
+   # 建立 CDC 連接器 (rooms)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/pg-kafka/source_rooms.json http://localhost:9083/connectors
+   ```
+   3. 建立 Topics in kafka (Sink)
+   ```shell
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-configs-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-offsets-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic connect-status-kafka-es \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic dlq-users \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+
+   docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 \
+      --create --topic dlq-rooms \
+      --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=compact
+   ```
+   4. 建立 CDC 連接器 (Sink)
+   ```shell
+   # 啟動 connect-kafka-es 容器
+   docker-compose up -d connect-kafka-es
+
+   # 建立 CDC 連接器 (users)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/kafka-es/sink_users.json http://localhost:9084/connectors
+   
+   # 建立 CDC 連接器 (rooms)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/kafka-es/sink_rooms.json http://localhost:9084/connectors
    ```
 
 - **主頁**：http://localhost:8080  

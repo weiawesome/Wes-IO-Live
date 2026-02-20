@@ -8,6 +8,7 @@ import (
 	"github.com/weiawesome/wes-io-live/pkg/database"
 	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/middleware"
+	"github.com/weiawesome/wes-io-live/user-service/internal/cache"
 	"github.com/weiawesome/wes-io-live/user-service/internal/config"
 	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/user-service/internal/handler"
@@ -60,8 +61,16 @@ func main() {
 	// Initialize repository
 	userRepo := repository.NewGormUserRepository(db)
 
+	// Initialize Redis cache
+	userCache, err := cache.NewRedisUserCache(cfg.Redis, cfg.Cache.Prefix)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to connect to redis")
+	}
+	defer userCache.Close()
+	logger.Info().Str("addr", cfg.Redis.Address).Msg("redis connected")
+
 	// Initialize service
-	userService, err := service.NewUserService(userRepo, cfg.AuthService.GRPCAddress)
+	userService, err := service.NewUserService(userRepo, cfg.AuthService.GRPCAddress, userCache, cfg.Cache.TTL)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to create user service")
 	}

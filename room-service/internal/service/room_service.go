@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/room-service/internal/audit"
+	"github.com/weiawesome/wes-io-live/room-service/internal/cache"
 	"github.com/weiawesome/wes-io-live/room-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/room-service/internal/repository"
 )
@@ -20,13 +24,18 @@ var (
 type roomServiceImpl struct {
 	repo            repository.RoomRepository
 	maxRoomsPerUser int
+	cache           cache.RoomCache
+	cacheTTL        time.Duration
+	sf              singleflight.Group
 }
 
 // NewRoomService creates a new room service.
-func NewRoomService(repo repository.RoomRepository, maxRoomsPerUser int) RoomService {
+func NewRoomService(repo repository.RoomRepository, maxRoomsPerUser int, roomCache cache.RoomCache, cacheTTL time.Duration) RoomService {
 	return &roomServiceImpl{
 		repo:            repo,
 		maxRoomsPerUser: maxRoomsPerUser,
+		cache:           roomCache,
+		cacheTTL:        cacheTTL,
 	}
 }
 
@@ -66,11 +75,15 @@ func (s *roomServiceImpl) CreateRoom(ctx context.Context, userID, username strin
 	return &resp, nil
 }
 
-// GetRoom retrieves a room by ID.
+// GetRoom retrieves a room by ID with cache-aside + singleflight.
 func (s *roomServiceImpl) GetRoom(ctx context.Context, roomID string) (*domain.RoomResponse, error) {
 	l := log.Ctx(ctx)
 
-	room, err := s.repo.GetByID(ctx, roomID)
+	cacheKey := s.cache.BuildKeyByID(roomID)
+
+	result, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		return s.fetchRoomByIDWithCache(ctx, roomID, cacheKey)
+	})
 	if err != nil {
 		if errors.Is(err, repository.ErrRoomNotFound) {
 			return nil, ErrRoomNotFound
@@ -79,6 +92,7 @@ func (s *roomServiceImpl) GetRoom(ctx context.Context, roomID string) (*domain.R
 		return nil, err
 	}
 
+	room := result.(*domain.Room)
 	resp := room.ToResponse()
 	return &resp, nil
 }
@@ -195,6 +209,9 @@ func (s *roomServiceImpl) CloseRoom(ctx context.Context, userID, roomID string) 
 		return err
 	}
 
+	// Invalidate cache
+	s.invalidateCache(ctx, roomID)
+
 	audit.Log(ctx, audit.ActionCloseRoom, userID, "room closed")
 
 	return nil
@@ -210,4 +227,51 @@ func (s *roomServiceImpl) GetRoomStats(ctx context.Context, userID string) (acti
 		return 0, 0, err
 	}
 	return activeCount, s.maxRoomsPerUser, nil
+}
+
+// fetchRoomByIDWithCache tries cache first, falls back to DB.
+func (s *roomServiceImpl) fetchRoomByIDWithCache(ctx context.Context, roomID, cacheKey string) (*domain.Room, error) {
+	// Try cache
+	cached, err := s.cache.Get(ctx, cacheKey)
+	if err == nil {
+		return &cached.Room, nil
+	}
+	if !errors.Is(err, cache.ErrCacheMiss) {
+		l := log.Ctx(ctx)
+		l.Warn().Err(err).Msg("cache get error")
+	}
+
+	// Fetch from DB
+	room, err := s.repo.GetByID(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Async write cache
+	s.asyncCacheSet(room)
+
+	return room, nil
+}
+
+// asyncCacheSet writes room to cache asynchronously.
+func (s *roomServiceImpl) asyncCacheSet(room *domain.Room) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		result := &cache.RoomCacheResult{Room: *room}
+
+		if err := s.cache.Set(ctx, s.cache.BuildKeyByID(room.ID), result, s.cacheTTL); err != nil {
+			l := log.L()
+			l.Warn().Err(err).Str(audit.FieldRoomID, room.ID).Msg("cache set error (by ID)")
+		}
+	}()
+}
+
+// invalidateCache deletes cache entries for a room.
+func (s *roomServiceImpl) invalidateCache(ctx context.Context, roomID string) {
+	if err := s.cache.Delete(ctx, s.cache.BuildKeyByID(roomID)); err != nil {
+		l := log.Ctx(ctx)
+		l.Warn().Err(err).Str(audit.FieldRoomID, roomID).Msg("cache invalidation error")
+	}
 }

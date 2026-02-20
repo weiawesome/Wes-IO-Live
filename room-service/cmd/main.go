@@ -8,6 +8,7 @@ import (
 	"github.com/weiawesome/wes-io-live/pkg/database"
 	pkglog "github.com/weiawesome/wes-io-live/pkg/log"
 	"github.com/weiawesome/wes-io-live/pkg/middleware"
+	"github.com/weiawesome/wes-io-live/room-service/internal/cache"
 	"github.com/weiawesome/wes-io-live/room-service/internal/config"
 	"github.com/weiawesome/wes-io-live/room-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/room-service/internal/handler"
@@ -60,8 +61,16 @@ func main() {
 	// Initialize repository
 	roomRepo := repository.NewGormRoomRepository(db)
 
+	// Initialize Redis cache
+	roomCache, err := cache.NewRedisRoomCache(cfg.Redis, cfg.Cache.Prefix)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to connect to redis")
+	}
+	defer roomCache.Close()
+	logger.Info().Msg("redis cache connected")
+
 	// Initialize service
-	roomService := service.NewRoomService(roomRepo, cfg.Room.MaxRoomsPerUser)
+	roomService := service.NewRoomService(roomRepo, cfg.Room.MaxRoomsPerUser, roomCache, cfg.Cache.TTL)
 
 	// Initialize auth middleware
 	authMiddleware, err := middleware.NewAuthMiddleware(cfg.AuthService.GRPCAddress)

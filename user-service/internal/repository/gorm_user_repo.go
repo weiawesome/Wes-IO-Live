@@ -26,7 +26,8 @@ func NewGormUserRepository(db *gorm.DB) *GormUserRepository {
 func (r *GormUserRepository) Create(ctx context.Context, user *domain.User) error {
 	l := log.Ctx(ctx)
 
-	user.ID = uuid.New().String()
+	id, _ := uuid.NewV7()
+	user.ID = id.String()
 	if user.Roles == nil {
 		user.Roles = []string{"user"}
 	}
