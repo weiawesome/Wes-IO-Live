@@ -32,7 +32,8 @@
 | **微服務架構** | Auth / User / Room / Signal / Media / Chat 等服務分離，易擴展 |
 | **即時聊天** | WebSocket 聊天 + Kafka + Cassandra 歷史存儲 |
 | **STUN/TURN** | ICE 服務提供穿透與中繼，適配複雜網路環境 |
-| **監控** | Elasticsearch、Fluentd、Kibana |
+| **日誌監控** | Elasticsearch、Fluentd、Kibana |
+| **性能監控** | Node Exporter、Cadvisor、Prometheus、Grafana |
 | **搜索** | CDC + Elasticsearch |
 
 ---
@@ -173,7 +174,7 @@ docker-compose up -d
 - 登入/註冊 → 建立房間 → 開始直播
 
 ---
-## 🔍 監控
+## 🔍 日誌監控
 
 ### 統一結構日誌設計 [/pkg/log](./pkg/log)
 
@@ -197,6 +198,25 @@ docker-compose up -d
    ![微服務內操作量](./assets/06-02-service-actions.png)
 4. 看板範例
    ![看板範例](./assets/06-03-dashboard.png)
+
+以上僅是簡單的範例，實際使用時可以根據需要進行調整。
+
+---
+
+## 📊 性能監控
+
+### Grafana 圖表範例
+0. Grafana 看板
+   ![Grafana 看板](./assets/07-00-grafana.png)
+1. Node Exporter ([模板 ID: 1860](https://grafana.com/grafana/dashboards/1860-node-exporter-full/))
+
+   ![Node Exporter](./assets/07-03-node-exporter.png)
+
+2. Cadvisor ([模板 ID: 14282](https://grafana.com/grafana/dashboards/14282-cadvisor-exporter/))
+
+   ![Cadvisor](./assets/07-01-cadvisor.png)
+   
+   ![Cadvisor](./assets/07-02-cadvisor.png)
 
 以上僅是簡單的範例，實際使用時可以根據需要進行調整。
 
