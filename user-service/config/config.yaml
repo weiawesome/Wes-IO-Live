@@ -18,5 +18,14 @@ database:
 auth_service:
   grpc_address: "127.0.0.1:50051"
 
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+
+cache:
+  prefix: "user"
+  ttl: "30s"
+
 log:
   level: "info"

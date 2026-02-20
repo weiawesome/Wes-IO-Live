@@ -3,14 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/weiawesome/wes-io-live/pkg/log"
 	pb "github.com/weiawesome/wes-io-live/proto/auth"
 	"github.com/weiawesome/wes-io-live/user-service/internal/audit"
+	"github.com/weiawesome/wes-io-live/user-service/internal/cache"
 	"github.com/weiawesome/wes-io-live/user-service/internal/domain"
 	"github.com/weiawesome/wes-io-live/user-service/internal/repository"
 )
@@ -25,10 +28,13 @@ var (
 type userServiceImpl struct {
 	repo       repository.UserRepository
 	authClient pb.AuthServiceClient
+	cache      cache.UserCache
+	cacheTTL   time.Duration
+	sf         singleflight.Group
 }
 
 // NewUserService creates a new user service.
-func NewUserService(repo repository.UserRepository, authServiceAddr string) (UserService, error) {
+func NewUserService(repo repository.UserRepository, authServiceAddr string, userCache cache.UserCache, cacheTTL time.Duration) (UserService, error) {
 	conn, err := grpc.Dial(authServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
@@ -37,6 +43,8 @@ func NewUserService(repo repository.UserRepository, authServiceAddr string) (Use
 	return &userServiceImpl{
 		repo:       repo,
 		authClient: pb.NewAuthServiceClient(conn),
+		cache:      userCache,
+		cacheTTL:   cacheTTL,
 	}, nil
 }
 
@@ -77,6 +85,9 @@ func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequ
 		return nil, err
 	}
 
+	// Async write cache (by ID + by Email)
+	s.asyncCacheSet(user)
+
 	audit.Log(ctx, audit.ActionRegister, user.ID, "user registered")
 
 	return &domain.AuthResponse{
@@ -91,8 +102,8 @@ func (s *userServiceImpl) Register(ctx context.Context, req *domain.RegisterRequ
 func (s *userServiceImpl) Login(ctx context.Context, req *domain.LoginRequest) (*domain.AuthResponse, error) {
 	l := log.Ctx(ctx)
 
-	// Find user
-	user, err := s.repo.GetByEmail(ctx, req.Email)
+	// Find user via cache-aside + singleflight (by email)
+	user, err := s.getUserByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			audit.LogWithDetail(ctx, audit.ActionLoginFailed, "", req.Email, "login failed: user not found")
@@ -152,21 +163,21 @@ func (s *userServiceImpl) RefreshToken(ctx context.Context, req *domain.RefreshT
 		return nil, ErrInvalidCredentials
 	}
 
-	// Get user
-	user, err := s.repo.GetByID(ctx, validateResp.UserId)
+	// Get user (uses cache-aside + singleflight via GetUser path)
+	userResp, err := s.GetUser(ctx, validateResp.UserId)
 	if err != nil {
-		if errors.Is(err, repository.ErrUserNotFound) {
+		if errors.Is(err, ErrUserNotFound) {
 			return nil, ErrInvalidCredentials
 		}
 		l.Error().Err(err).Str(log.FieldUserID, validateResp.UserId).Msg("failed to get user after token refresh")
 		return nil, err
 	}
 
-	audit.Log(ctx, audit.ActionRefreshToken, user.ID, "token refreshed")
+	audit.Log(ctx, audit.ActionRefreshToken, userResp.ID, "token refreshed")
 
 	// Return new tokens
 	return &domain.AuthResponse{
-		User:         user.ToResponse(),
+		User:         *userResp,
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		ExpiresAt:    tokenResp.AccessExpiresAt,
@@ -189,11 +200,15 @@ func (s *userServiceImpl) Logout(ctx context.Context, userID string) error {
 	return nil
 }
 
-// GetUser retrieves a user by ID.
+// GetUser retrieves a user by ID with cache-aside + singleflight.
 func (s *userServiceImpl) GetUser(ctx context.Context, userID string) (*domain.UserResponse, error) {
 	l := log.Ctx(ctx)
 
-	user, err := s.repo.GetByID(ctx, userID)
+	cacheKey := s.cache.BuildKeyByID(userID)
+
+	result, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		return s.fetchUserByIDWithCache(ctx, userID, cacheKey)
+	})
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, ErrUserNotFound
@@ -202,6 +217,7 @@ func (s *userServiceImpl) GetUser(ctx context.Context, userID string) (*domain.U
 		return nil, err
 	}
 
+	user := result.(*domain.User)
 	resp := user.ToResponse()
 	return &resp, nil
 }
@@ -227,6 +243,9 @@ func (s *userServiceImpl) UpdateUser(ctx context.Context, userID string, req *do
 		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("failed to update user")
 		return nil, err
 	}
+
+	// Invalidate cache (by ID + by Email)
+	s.invalidateCache(ctx, userID, user.Email)
 
 	audit.Log(ctx, audit.ActionUpdateProfile, userID, "profile updated")
 
@@ -265,6 +284,9 @@ func (s *userServiceImpl) ChangePassword(ctx context.Context, userID string, req
 		return err
 	}
 
+	// Invalidate cache (by ID + by Email)
+	s.invalidateCache(ctx, userID, user.Email)
+
 	audit.Log(ctx, audit.ActionChangePassword, userID, "password changed")
 	return nil
 }
@@ -272,6 +294,12 @@ func (s *userServiceImpl) ChangePassword(ctx context.Context, userID string, req
 // DeleteUser deletes a user.
 func (s *userServiceImpl) DeleteUser(ctx context.Context, userID string) error {
 	l := log.Ctx(ctx)
+
+	// Get user email before deletion for cache invalidation
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+		l.Warn().Err(err).Str(log.FieldUserID, userID).Msg("failed to get user before delete for cache invalidation")
+	}
 
 	// Revoke tokens first
 	if _, err := s.authClient.RevokeTokens(ctx, &pb.RevokeTokensRequest{
@@ -285,6 +313,104 @@ func (s *userServiceImpl) DeleteUser(ctx context.Context, userID string) error {
 		return err
 	}
 
+	// Invalidate cache
+	if user != nil {
+		s.invalidateCache(ctx, userID, user.Email)
+	} else {
+		s.invalidateCache(ctx, userID, "")
+	}
+
 	audit.Log(ctx, audit.ActionDeleteAccount, userID, "account deleted")
 	return nil
+}
+
+// fetchUserByIDWithCache tries cache first, falls back to DB.
+func (s *userServiceImpl) fetchUserByIDWithCache(ctx context.Context, userID, cacheKey string) (*domain.User, error) {
+	// Try cache
+	cached, err := s.cache.Get(ctx, cacheKey)
+	if err == nil {
+		return &cached.User, nil
+	}
+	if !errors.Is(err, cache.ErrCacheMiss) {
+		l := log.Ctx(ctx)
+		l.Warn().Err(err).Msg("cache get error")
+	}
+
+	// Fetch from DB
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Async write cache
+	s.asyncCacheSet(user)
+
+	return user, nil
+}
+
+// getUserByEmail fetches user by email with cache-aside + singleflight.
+func (s *userServiceImpl) getUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	cacheKey := s.cache.BuildKeyByEmail(email)
+
+	result, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		// Try cache
+		cached, err := s.cache.Get(ctx, cacheKey)
+		if err == nil {
+			return &cached.User, nil
+		}
+		if !errors.Is(err, cache.ErrCacheMiss) {
+			l := log.Ctx(ctx)
+			l.Warn().Err(err).Msg("cache get error")
+		}
+
+		// Fetch from DB
+		user, err := s.repo.GetByEmail(ctx, email)
+		if err != nil {
+			return nil, err
+		}
+
+		// Async write cache (by ID + by Email)
+		s.asyncCacheSet(user)
+
+		return user, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*domain.User), nil
+}
+
+// asyncCacheSet writes user to cache asynchronously (by ID + by Email).
+func (s *userServiceImpl) asyncCacheSet(user *domain.User) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		result := &cache.UserCacheResult{User: *user}
+
+		if err := s.cache.Set(ctx, s.cache.BuildKeyByID(user.ID), result, s.cacheTTL); err != nil {
+			l := log.L()
+			l.Warn().Err(err).Str(log.FieldUserID, user.ID).Msg("cache set error (by ID)")
+		}
+
+		if err := s.cache.Set(ctx, s.cache.BuildKeyByEmail(user.Email), result, s.cacheTTL); err != nil {
+			l := log.L()
+			l.Warn().Err(err).Str(log.FieldUserID, user.ID).Msg("cache set error (by email)")
+		}
+	}()
+}
+
+// invalidateCache deletes cache entries for a user.
+func (s *userServiceImpl) invalidateCache(ctx context.Context, userID, email string) {
+	keys := []string{s.cache.BuildKeyByID(userID)}
+	if email != "" {
+		keys = append(keys, s.cache.BuildKeyByEmail(email))
+	}
+
+	if err := s.cache.Delete(ctx, keys...); err != nil {
+		l := log.Ctx(ctx)
+		l.Warn().Err(err).Str(log.FieldUserID, userID).Msg("cache invalidation error")
+	}
 }
