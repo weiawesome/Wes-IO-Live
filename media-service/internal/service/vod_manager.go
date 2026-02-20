@@ -29,6 +29,7 @@ type VODManager struct {
 	mu               sync.RWMutex
 	ctx              context.Context
 	cancel           context.CancelFunc
+	stopOnce         sync.Once
 }
 
 // VODManagerConfig holds configuration for VOD manager.
@@ -88,18 +89,20 @@ func (m *VODManager) Start() {
 
 // Stop stops the VOD manager.
 func (m *VODManager) Stop() {
-	m.cancel()
+	m.stopOnce.Do(func() {
+		m.cancel()
 
-	// Stop all watchers
-	m.segmentWatcher.StopAll()
+		// Stop all watchers
+		m.segmentWatcher.StopAll()
 
-	// Stop uploader
-	if m.uploader != nil {
-		m.uploader.Stop()
-	}
+		// Stop uploader
+		if m.uploader != nil {
+			m.uploader.Stop()
+		}
 
-	l := pkglog.L()
-	l.Info().Msg("vod manager stopped")
+		l := pkglog.L()
+		l.Info().Msg("vod manager stopped")
+	})
 }
 
 // sessionKey returns the key for playlistBuilders map
