@@ -1,0 +1,21 @@
+server:
+  host: "0.0.0.0"
+  port: 8094
+
+elasticsearch:
+  addresses:
+    - "http://localhost:9200"
+  index_users: "cdc-public-users"
+  index_rooms: "cdc-public-rooms"
+
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+
+cache:
+  prefix: "search"
+  ttl: "30s"
+
+log:
+  level: "info"
