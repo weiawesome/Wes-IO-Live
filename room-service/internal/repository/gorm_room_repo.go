@@ -26,7 +26,8 @@ func NewGormRoomRepository(db *gorm.DB) *GormRoomRepository {
 func (r *GormRoomRepository) Create(ctx context.Context, room *domain.Room) error {
 	l := log.Ctx(ctx)
 
-	room.ID = uuid.New().String()
+	id, _ := uuid.NewV7()
+	room.ID = id.String()
 	room.Status = domain.RoomStatusActive
 
 	model := domain.RoomToModel(room)

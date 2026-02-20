@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	pkgconfig "github.com/weiawesome/wes-io-live/pkg/config"
 )
 
@@ -8,8 +10,21 @@ type Config struct {
 	Server      ServerConfig
 	Database    DatabaseConfig
 	AuthService AuthServiceConfig `mapstructure:"auth_service"`
+	Redis       RedisConfig
+	Cache       CacheConfig
 	Room        RoomConfig
 	Log         LogConfig
+}
+
+type RedisConfig struct {
+	Address  string `mapstructure:"address"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+}
+
+type CacheConfig struct {
+	Prefix string        `mapstructure:"prefix"`
+	TTL    time.Duration `mapstructure:"ttl"`
 }
 
 type ServerConfig struct {
@@ -64,6 +79,11 @@ func Load() (*Config, error) {
 	v.SetDefault("database.max_open_conns", 100)
 	v.SetDefault("database.conn_max_lifetime", 60)
 	v.SetDefault("auth_service.grpc_address", "localhost:50051")
+	v.SetDefault("redis.address", "localhost:6379")
+	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.db", 0)
+	v.SetDefault("cache.prefix", "room")
+	v.SetDefault("cache.ttl", "30s")
 	v.SetDefault("room.max_rooms_per_user", 3)
 	v.SetDefault("log.level", "info")
 
@@ -81,6 +101,8 @@ func Load() (*Config, error) {
 	v.BindEnv("database.max_open_conns", "DB_MAX_OPEN_CONNS")
 	v.BindEnv("database.conn_max_lifetime", "DB_CONN_MAX_LIFETIME")
 	v.BindEnv("auth_service.grpc_address", "AUTH_SERVICE_GRPC")
+	v.BindEnv("redis.address", "REDIS_ADDRESS")
+	v.BindEnv("redis.password", "REDIS_PASSWORD")
 	v.BindEnv("room.max_rooms_per_user", "MAX_ROOMS_PER_USER")
 
 	var cfg Config
