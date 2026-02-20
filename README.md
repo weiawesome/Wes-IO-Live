@@ -32,7 +32,8 @@
 | **Microservice Architecture** | Auth / User / Room / Signal / Media / Chat are separated for scalability |
 | **Real-time Chat**    | WebSocket chat + Kafka + Cassandra message persistence |
 | **STUN/TURN**         | ICE service for NAT traversal/relay, handles complex network scenarios |
-| **Monitoring**        | Elasticsearch, Fluentd, Kibana |
+| **Logging Monitoring** | Elasticsearch, Fluentd, Kibana |
+| **Performance Monitoring** | Node Exporter, Cadvisor, Prometheus, Grafana |
 | **Search**            | CDC + Elasticsearch |
 
 ---
@@ -196,6 +197,26 @@ Easily parsed by Fluentd and stored in Elasticsearch for monitoring.
    ![Service Action Count](./assets/06-02-service-actions.png)
 4. Dashboard Example
    ![Dashboard Example](./assets/06-03-dashboard.png)
+
+Above are just simple examples, you can adjust them according to your needs.
+
+---
+
+## 📊 Performance Monitoring
+
+### Grafana Dashboard Examples
+
+0. Grafana Dashboard
+   ![Grafana Dashboard](./assets/07-00-grafana.png)
+1. Node Exporter ([Template ID: 1860](https://grafana.com/grafana/dashboards/1860-node-exporter-full/))
+
+   ![Node Exporter](./assets/07-03-node-exporter.png)
+
+2. Cadvisor ([Template ID: 14282](https://grafana.com/grafana/dashboards/14282-cadvisor-exporter/))
+
+   ![Cadvisor](./assets/07-01-cadvisor.png)
+
+   ![Cadvisor](./assets/07-02-cadvisor.png)
 
 Above are just simple examples, you can adjust them according to your needs.
 
