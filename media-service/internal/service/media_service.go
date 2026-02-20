@@ -207,11 +207,6 @@ func (s *mediaService) Stop() error {
 	}
 	s.mu.Unlock()
 
-	// Stop VOD manager
-	if s.vodManager != nil {
-		s.vodManager.Stop()
-	}
-
 	return nil
 }
 

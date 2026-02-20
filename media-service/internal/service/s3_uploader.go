@@ -32,6 +32,7 @@ type S3Uploader struct {
 	cancel     context.CancelFunc
 	maxRetries int
 	retryDelay time.Duration
+	stopOnce   sync.Once
 }
 
 // S3UploaderConfig holds configuration for the S3 uploader.
@@ -82,11 +83,13 @@ func (u *S3Uploader) Start() {
 
 // Stop gracefully stops all workers.
 func (u *S3Uploader) Stop() {
-	u.cancel()
-	close(u.queue)
-	u.wg.Wait()
-	l := pkglog.L()
-	l.Info().Msg("s3 uploader stopped")
+	u.stopOnce.Do(func() {
+		u.cancel()
+		close(u.queue)
+		u.wg.Wait()
+		l := pkglog.L()
+		l.Info().Msg("s3 uploader stopped")
+	})
 }
 
 // Upload queues a file for upload.
