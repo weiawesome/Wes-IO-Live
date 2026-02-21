@@ -16,4 +16,11 @@ type UserService interface {
 	UpdateUser(ctx context.Context, userID string, req *domain.UpdateUserRequest) (*domain.UserResponse, error)
 	ChangePassword(ctx context.Context, userID string, req *domain.ChangePasswordRequest) error
 	DeleteUser(ctx context.Context, userID string) error
+	// GenerateAvatarUploadURL generates a presigned PUT URL for direct avatar upload.
+	GenerateAvatarUploadURL(ctx context.Context, userID, contentType string) (*domain.AvatarPresignResponse, error)
+	// DeleteAvatar removes avatar data for a user.
+	DeleteAvatar(ctx context.Context, userID string) error
+	// HandleAvatarProcessed tags old avatar objects for lifecycle deletion and updates the DB
+	// with new bucket+key refs for raw and all processed sizes.
+	HandleAvatarProcessed(ctx context.Context, userID string, raw domain.AvatarObjectRef, processed domain.AvatarObjects) error
 }
