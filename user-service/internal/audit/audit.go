@@ -17,6 +17,8 @@ const (
 	ActionUpdateProfile  = "user.update_profile"
 	ActionChangePassword = "user.change_password"
 	ActionDeleteAccount  = "user.delete_account"
+	ActionAvatarPresign  = "user.avatar.presign"
+	ActionAvatarDelete   = "user.avatar.delete"
 )
 
 // Field constants for audit entries.
