@@ -233,6 +233,17 @@ func (s *LocalStorage) GetURL(ctx context.Context, key string, expires time.Dura
 	return "/" + key, nil
 }
 
+// GetUploadURL is not supported for local storage.
+func (s *LocalStorage) GetUploadURL(ctx context.Context, key, contentType string, expires time.Duration) (string, error) {
+	return "", fmt.Errorf("presigned upload not supported for local storage")
+}
+
+// TagObject is a no-op for local storage (no tagging concept).
+func (s *LocalStorage) TagObject(_ context.Context, _, _, _ string) error { return nil }
+
+// RemoveObjectTagging is a no-op for local storage (no tagging concept).
+func (s *LocalStorage) RemoveObjectTagging(_ context.Context, _ string) error { return nil }
+
 // GetBasePath returns the base path for the storage.
 func (s *LocalStorage) GetBasePath() string {
 	return s.basePath
