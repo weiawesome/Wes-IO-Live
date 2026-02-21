@@ -49,6 +49,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			users.PUT("/me", h.UpdateMe)
 			users.PUT("/me/password", h.ChangePassword)
 			users.DELETE("/me", h.DeleteMe)
+			users.POST("/me/avatar/presign", h.PresignAvatar)
+			users.DELETE("/me/avatar", h.DeleteAvatar)
 		}
 	}
 }
@@ -253,6 +255,60 @@ func (h *Handler) DeleteMe(c *gin.Context) {
 		}
 		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("delete user failed")
 		response.InternalError(c, "failed to delete user")
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// PresignAvatar generates a presigned PUT URL for avatar upload.
+func (h *Handler) PresignAvatar(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	var req domain.AvatarPresignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		l.Warn().Err(err).Msg("invalid avatar presign request")
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.userService.GenerateAvatarUploadURL(ctx, userID, req.ContentType)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("avatar presign failed")
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// DeleteAvatar removes the current user's avatar.
+func (h *Handler) DeleteAvatar(c *gin.Context) {
+	ctx := c.Request.Context()
+	l := log.Ctx(ctx)
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+
+	if err := h.userService.DeleteAvatar(ctx, userID); err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.NotFound(c, "user not found")
+			return
+		}
+		l.Error().Err(err).Str(log.FieldUserID, userID).Msg("delete avatar failed")
+		response.InternalError(c, "failed to delete avatar")
 		return
 	}
 
