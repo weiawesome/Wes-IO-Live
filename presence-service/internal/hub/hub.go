@@ -30,6 +30,7 @@ type Hub struct {
 	broadcast  chan *RoomMessage
 	mu         sync.RWMutex
 	config     Config
+	quit       chan struct{}
 }
 
 // Config holds hub configuration.
@@ -56,6 +57,7 @@ func NewHub(cfg Config) *Hub {
 		unregister: make(chan *Client),
 		broadcast:  make(chan *RoomMessage, 256),
 		config:     cfg,
+		quit:       make(chan struct{}),
 	}
 }
 
@@ -103,8 +105,43 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mu.RUnlock()
+
+		case <-h.quit:
+			// Close all active WebSocket connections
+			h.mu.Lock()
+			for _, client := range h.clients {
+				client.Conn.Close()
+			}
+			h.mu.Unlock()
+			// Drain remaining unregister events until all clients cleaned up
+			for len(h.clients) > 0 {
+				select {
+				case client := <-h.unregister:
+					h.mu.Lock()
+					if _, ok := h.clients[client.ID]; ok {
+						for roomID, roomClients := range h.rooms {
+							delete(roomClients, client.ID)
+							if len(roomClients) == 0 {
+								delete(h.rooms, roomID)
+							}
+						}
+						delete(h.clients, client.ID)
+						close(client.Send)
+					}
+					h.mu.Unlock()
+					l.Info().Str("client_id", client.ID).Msg("client unregistered")
+				case <-h.register:  // ignore during shutdown
+				case <-h.broadcast: // ignore during shutdown
+				}
+			}
+			return
 		}
 	}
+}
+
+// Stop signals the hub to close all connections and exit Run().
+func (h *Hub) Stop() {
+	close(h.quit)
 }
 
 // Register adds a client to the hub.
