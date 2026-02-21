@@ -133,6 +133,10 @@ docker-compose up -d
    # 建立 CDC 連接器 (rooms)
    curl -X POST -H "Content-Type: application/json" \
       -d @connect/pg-kafka/source_rooms.json http://localhost:9083/connectors
+
+   # 建立 CDC 連接器 (follows)
+   curl -X POST -H "Content-Type: application/json" \
+      -d @connect/pg-kafka/source_follows.json http://localhost:9083/connectors
    ```
    3. 建立 Topics in kafka (Sink)
    ```shell
