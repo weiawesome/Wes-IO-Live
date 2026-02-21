@@ -72,7 +72,7 @@ func (cc *ConfluentConsumer) consumeLoop(ctx context.Context) {
 				continue
 			}
 
-			cc.processMessage(ctx, msg)
+			cc.processMessage(context.WithoutCancel(ctx), msg)
 		}
 	}
 }
@@ -100,9 +100,9 @@ func (cc *ConfluentConsumer) processMessage(ctx context.Context, msg *kafka.Mess
 
 // Close stops the consumer and releases resources.
 func (cc *ConfluentConsumer) Close() error {
+	<-cc.doneCh // wait for in-flight processMessage to complete
 	if err := cc.consumer.Close(); err != nil {
 		return fmt.Errorf("failed to close kafka consumer: %w", err)
 	}
-	<-cc.doneCh
 	return nil
 }
