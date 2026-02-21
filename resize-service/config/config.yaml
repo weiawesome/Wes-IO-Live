@@ -1,0 +1,42 @@
+log:
+  level: "info"
+
+kafka:
+  brokers: "localhost:9092"
+  consumer_topic: "minio-events"
+  consumer_group_id: "resize-service"
+  producer_topic: "avatar-processed"
+
+storage:
+  type: "s3"
+  s3:
+    endpoint: ""          # e.g. "http://minio:9000"
+    region: "us-east-1"
+    bucket: ""            # e.g. "users"
+    access_key_id: ""
+    secret_access_key: ""
+    use_path_style: true  # Required for MinIO
+    public_url: ""        # e.g. "http://localhost:9000"
+  local:
+    base_path: "./data/storage"
+
+processor:
+  bucket_filter: "users"
+  prefix_filter: "avatars/raw/"
+  output_prefix: "avatars/processed/"
+  event_name_filters:
+    - "s3:ObjectCreated:Put"
+  jpeg_quality: 85
+  lifecycle:
+    tag_key: "lifecycle"
+    tag_value: "delete-pending"
+  sizes:
+    - name: "sm"
+      width: 48
+      height: 48
+    - name: "md"
+      width: 128
+      height: 128
+    - name: "lg"
+      width: 512
+      height: 512
