@@ -17,6 +17,7 @@ type Subscriber struct {
 	channel    string
 	hub        *hub.Hub
 	instanceID string
+	doneCh     chan struct{}
 }
 
 // NewSubscriber creates a new Redis Pub/Sub subscriber for room updates.
@@ -29,12 +30,17 @@ func NewSubscriber(client *redis.Client, channel string, h *hub.Hub, instanceID 
 		channel:    channel,
 		hub:        h,
 		instanceID: instanceID,
+		doneCh:     make(chan struct{}),
 	}
 }
+
+// Done returns a channel that is closed when Run() exits.
+func (s *Subscriber) Done() <-chan struct{} { return s.doneCh }
 
 // Run subscribes to the channel and broadcasts count updates to local hub until ctx is done.
 // Reconnects on receive errors.
 func (s *Subscriber) Run(ctx context.Context) {
+	defer close(s.doneCh)
 	l := pkglog.L()
 
 	for {
