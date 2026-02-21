@@ -41,4 +41,17 @@ type Storage interface {
 	// For local storage, this returns the file path.
 	// For S3, this returns a presigned URL valid for the specified duration.
 	GetURL(ctx context.Context, key string, expires time.Duration) (string, error)
+
+	// GetUploadURL returns a presigned PUT URL for direct client upload.
+	// The client can use this URL to upload content directly to the storage backend.
+	// Returns an error for backends that do not support presigned uploads (e.g. local storage).
+	GetUploadURL(ctx context.Context, key, contentType string, expires time.Duration) (string, error)
+
+	// TagObject sets a single tag on an existing object.
+	// For backends that do not support tagging (e.g. local storage) this is a no-op.
+	TagObject(ctx context.Context, key, tagKey, tagValue string) error
+
+	// RemoveObjectTagging removes all tags from an existing object.
+	// For backends that do not support tagging (e.g. local storage) this is a no-op.
+	RemoveObjectTagging(ctx context.Context, key string) error
 }

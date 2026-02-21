@@ -4,7 +4,16 @@ import (
 	"time"
 
 	pkgconfig "github.com/weiawesome/wes-io-live/pkg/config"
+	"github.com/weiawesome/wes-io-live/pkg/storage"
 )
+
+// StorageConfig mirrors the nested structure used by playback-service / media-service.
+type StorageConfig struct {
+	Type            string              `mapstructure:"type"`
+	S3              storage.S3Config    `mapstructure:"s3"`
+	Local           storage.LocalConfig `mapstructure:"local"`
+	ProcessedBucket string              `mapstructure:"processed_bucket"`
+}
 
 type Config struct {
 	Server      ServerConfig
@@ -13,6 +22,20 @@ type Config struct {
 	Redis       RedisConfig
 	Cache       CacheConfig
 	Log         LogConfig
+	Storage     StorageConfig   `mapstructure:"storage"`
+	Kafka       KafkaConfig     `mapstructure:"kafka"`
+	Lifecycle   LifecycleConfig `mapstructure:"lifecycle"`
+}
+
+type KafkaConfig struct {
+	Brokers string `mapstructure:"brokers"`
+	Topic   string `mapstructure:"topic"`
+	GroupID string `mapstructure:"group_id"`
+}
+
+type LifecycleConfig struct {
+	TagKey   string `mapstructure:"tag_key"`
+	TagValue string `mapstructure:"tag_value"`
 }
 
 type RedisConfig struct {
@@ -80,6 +103,16 @@ func Load() (*Config, error) {
 	v.SetDefault("cache.prefix", "user")
 	v.SetDefault("cache.ttl", "30s")
 	v.SetDefault("log.level", "info")
+	v.SetDefault("storage.type", "s3")
+	v.SetDefault("storage.s3.region", "us-east-1")
+	v.SetDefault("storage.s3.use_path_style", true)
+	v.SetDefault("storage.local.base_path", "./data/storage")
+	v.SetDefault("storage.processed_bucket", "users-processed")
+	v.SetDefault("kafka.brokers", "localhost:9092")
+	v.SetDefault("kafka.topic", "avatar-processed")
+	v.SetDefault("kafka.group_id", "user-service")
+	v.SetDefault("lifecycle.tag_key", "lifecycle")
+	v.SetDefault("lifecycle.tag_value", "delete-pending")
 
 	// Bind environment variables
 	v.BindEnv("server.port", "PORT")
@@ -97,6 +130,19 @@ func Load() (*Config, error) {
 	v.BindEnv("auth_service.grpc_address", "AUTH_SERVICE_GRPC")
 	v.BindEnv("redis.address", "REDIS_ADDRESS")
 	v.BindEnv("redis.password", "REDIS_PASSWORD")
+	v.BindEnv("storage.type", "STORAGE_TYPE")
+	v.BindEnv("storage.s3.endpoint", "S3_ENDPOINT")
+	v.BindEnv("storage.s3.region", "S3_REGION")
+	v.BindEnv("storage.s3.bucket", "S3_BUCKET")
+	v.BindEnv("storage.s3.access_key_id", "S3_ACCESS_KEY_ID")
+	v.BindEnv("storage.s3.secret_access_key", "S3_SECRET_ACCESS_KEY")
+	v.BindEnv("storage.s3.public_url", "S3_PUBLIC_URL")
+	v.BindEnv("storage.processed_bucket", "S3_PROCESSED_BUCKET")
+	v.BindEnv("kafka.brokers", "KAFKA_BROKERS")
+	v.BindEnv("kafka.topic", "KAFKA_TOPIC")
+	v.BindEnv("kafka.group_id", "KAFKA_GROUP_ID")
+	v.BindEnv("lifecycle.tag_key", "LIFECYCLE_TAG_KEY")
+	v.BindEnv("lifecycle.tag_value", "LIFECYCLE_TAG_VALUE")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {

@@ -140,6 +140,28 @@ func (r *GormUserRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateAvatar persists the avatar_objects JSON column for a user.
+// Pass nil to clear all avatar data.
+func (r *GormUserRepository) UpdateAvatar(ctx context.Context, userID string, objects *string) error {
+	l := log.Ctx(ctx)
+
+	result := r.db.WithContext(ctx).Model(&domain.UserModel{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"avatar_objects": objects,
+		})
+	if result.Error != nil {
+		l.Error().Err(result.Error).Str(log.FieldUserID, userID).Msg("failed to update avatar in db")
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+
+	l.Debug().Str(log.FieldUserID, userID).Msg("avatar updated in db")
+	return nil
+}
+
 // handleError converts database-specific errors to domain errors.
 func (r *GormUserRepository) handleError(err error) error {
 	errStr := err.Error()

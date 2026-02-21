@@ -16,10 +16,11 @@ import (
 
 // S3Storage implements Storage interface for S3/MinIO.
 type S3Storage struct {
-	client       *s3.Client
-	presignClient *s3.PresignClient
-	bucket       string
-	publicURL    string
+	client              *s3.Client
+	presignClient       *s3.PresignClient // for GetURL (server-side reads)
+	uploadPresignClient *s3.PresignClient // for GetUploadURL; uses public endpoint when publicURL is set
+	bucket              string
+	publicURL           string
 }
 
 // S3Config holds configuration for S3 storage.
@@ -78,11 +79,25 @@ func NewS3Storage(ctx context.Context, cfg S3Config) (*S3Storage, error) {
 	client := s3.NewFromConfig(awsCfg, s3Opts...)
 	presignClient := s3.NewPresignClient(client)
 
+	// If publicURL is set, build a separate presign client using the public endpoint
+	// so that GetUploadURL returns URLs the browser can directly access.
+	var uploadPresignClient *s3.PresignClient
+	if cfg.PublicURL != "" {
+		pubClient := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(cfg.PublicURL)
+			o.UsePathStyle = cfg.UsePathStyle
+		})
+		uploadPresignClient = s3.NewPresignClient(pubClient)
+	} else {
+		uploadPresignClient = presignClient
+	}
+
 	return &S3Storage{
-		client:        client,
-		presignClient: presignClient,
-		bucket:        cfg.Bucket,
-		publicURL:     cfg.PublicURL,
+		client:              client,
+		presignClient:       presignClient,
+		uploadPresignClient: uploadPresignClient,
+		bucket:              cfg.Bucket,
+		publicURL:           cfg.PublicURL,
 	}, nil
 }
 
@@ -243,7 +258,54 @@ func (s *S3Storage) GetURL(ctx context.Context, key string, expires time.Duratio
 	return presignedReq.URL, nil
 }
 
+// GetUploadURL returns a presigned PUT URL for direct client upload.
+func (s *S3Storage) GetUploadURL(ctx context.Context, key, contentType string, expires time.Duration) (string, error) {
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	presignedReq, err := s.uploadPresignClient.PresignPutObject(ctx, input, func(opts *s3.PresignOptions) {
+		opts.Expires = expires
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to generate presigned upload URL: %w", err)
+	}
+
+	return presignedReq.URL, nil
+}
+
 // GetBucket returns the bucket name.
 func (s *S3Storage) GetBucket() string {
 	return s.bucket
+}
+
+// TagObject sets a single tag on an existing S3/MinIO object.
+func (s *S3Storage) TagObject(ctx context.Context, key, tagKey, tagValue string) error {
+	_, err := s.client.PutObjectTagging(ctx, &s3.PutObjectTaggingInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Tagging: &types.Tagging{
+			TagSet: []types.Tag{{Key: aws.String(tagKey), Value: aws.String(tagValue)}},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to tag object %s: %w", key, err)
+	}
+	return nil
+}
+
+// RemoveObjectTagging removes all tags from an existing S3/MinIO object.
+func (s *S3Storage) RemoveObjectTagging(ctx context.Context, key string) error {
+	_, err := s.client.DeleteObjectTagging(ctx, &s3.DeleteObjectTaggingInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove tags from object %s: %w", key, err)
+	}
+	return nil
 }

@@ -80,9 +80,14 @@ docker-compose up -d
 
 **After startup, complete the following manually:**
 
-1. **MinIO: Create VOD bucket**  
-   In the MinIO console or CLI, create a bucket named `vod` (for storing HLS files for VOD playback).
-
+1. **MinIO: Create bucket and set permissions, event notifications, and lifecycle**  
+   ```bash
+   docker exec -i minio bash < minio/bucket_settings.sh
+   ```
+   This will create `users`, `users-processed`, and `vod` buckets, and set the corresponding permissions.
+   And create event notification to send `put` events from `users` bucket to `minio-events` topic.
+   And create bucket lifecycle rule: `delete-pending` objects are deleted after 7 days.
+   
 2. **Cassandra: Create chat Keyspace and Table**  
    In the project root, run:
    ```bash
