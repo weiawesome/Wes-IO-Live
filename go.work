@@ -15,8 +15,10 @@ use (
 	./proto/auth
 	./proto/chat
 	./proto/id
+	./resize-service
 	./room-service
 	./search-service
 	./signal-service
+	./social-graph-service
 	./user-service
 )
