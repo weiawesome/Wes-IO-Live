@@ -80,12 +80,13 @@ docker-compose up -d
 
 **啟動後需手動完成以下設定：**
 
-1. **MinIO：建立 bucket 並設定權限與事件通知**  
+1. **MinIO：建立 bucket 並設定權限、事件通知、生命週期**  
    ```bash
    docker exec -i minio bash < minio/bucket_settings.sh
    ```
    這會建立 `users`、`users-processed` 和 `vod` 三個 bucket，並設定相應的權限。
    以及建立 event notification 將 `users` bucket 的 `put` 事件發送到 Kafka 的 `minio-events` topic。
+   並建立 bucket lifecycle rule：`delete-pending` 的物件在 7 天後自動刪除。
 
 2. **Cassandra：建立聊天 Keyspace 與表**  
    在專案根目錄執行：
