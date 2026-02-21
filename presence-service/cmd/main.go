@@ -83,9 +83,9 @@ func main() {
 
 	// Start service background tasks
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	if err := svc.Start(ctx); err != nil {
+		cancel()
 		logger.Fatal().Err(err).Msg("failed to start presence service")
 	}
 
@@ -94,19 +94,19 @@ func main() {
 	go subscriber.Run(ctx)
 
 	// Start Kafka consumer for broadcast events
-	kafkaConsumer, err := kafka.NewConfluentConsumer(
+	var kafkaConsumer *kafka.ConfluentConsumer
+	if kc, err := kafka.NewConfluentConsumer(
 		cfg.Kafka.Brokers,
 		cfg.Kafka.Topic,
 		cfg.Kafka.GroupID,
 		svc, // service implements BroadcastEventHandler
-	)
-	if err != nil {
+	); err != nil {
 		logger.Warn().Err(err).Msg("failed to create kafka consumer, live room tracking disabled")
 	} else {
-		if err := kafkaConsumer.Start(ctx); err != nil {
+		if err := kc.Start(ctx); err != nil {
 			logger.Warn().Err(err).Msg("failed to start kafka consumer")
 		} else {
-			defer kafkaConsumer.Close()
+			kafkaConsumer = kc
 			logger.Info().Str("topic", cfg.Kafka.Topic).Msg("kafka consumer started")
 		}
 	}
@@ -152,16 +152,32 @@ func main() {
 
 	logger.Info().Msg("shutting down presence-service")
 
-	// Stop service
-	svc.Stop()
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
 
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
+		cancel() // 1. stop Kafka consumer + pubsub subscriber
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error().Err(err).Msg("server shutdown error")
+		if kafkaConsumer != nil {
+			kafkaConsumer.Close() // 2. wait for in-flight Kafka event
+		}
+		<-subscriber.Done() // 3. wait for pub/sub goroutine to exit
+
+		h.Stop() // 4. close all WS clients, stop Hub.Run()
+
+		svc.Stop() // 5. cancel grace period timers
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error().Err(err).Msg("server shutdown error")
+		}
+	}()
+
+	select {
+	case <-shutdownDone:
+		logger.Info().Msg("presence-service stopped")
+	case <-time.After(30 * time.Second):
+		logger.Warn().Msg("shutdown timed out after 30s")
 	}
-
-	logger.Info().Msg("presence-service stopped")
 }
